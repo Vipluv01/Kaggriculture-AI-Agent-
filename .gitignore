@@ -5,3 +5,4 @@ __pycache__/
 *.json.gz
 results/
 .DS_Store
+submission.tar.gz

@@ -1,20 +1,31 @@
 """Rule-based Kaggriculture agent.
 
-Strategy: scan the farmer across every unlocked tile in a snake pattern.
-At each tile: harvest if ripe, water if thirsty, else plant the target crop
-if we're holding seed. Sell the shed's contents and restock seed every turn;
-once money clears a threshold, buy the next land quadrant.
+v2: farmer + hired hands each patrol their own band of tiles in a snake
+pattern; at each tile: harvest if ripe, water if thirsty, else plant the
+target crop if seed is held. TOMATO is the default crop: moderate seed cost
+(50), ongoing yield (produces repeatedly once mature) beats a one-shot crop
+like the "starter" baseline's CARROT loop once several tiles are in rotation.
 
-TOMATO is the default target crop: moderate seed cost (50), ongoing yield
-(produces repeatedly once mature) beats a one-shot crop like the "starter"
-baseline's CARROT loop once a few tiles are in rotation.
+Hands are re-hired every day (the env wipes farm["hands"] and resets the
+Fibonacci hire-cost counter at end-of-day) so the agent hires HANDS_CAP fresh
+hands each morning (hour 0) -- cheap, since the first few hires of a day cost
+$1-3 each.
+
+Land expansion was tried twice and dropped both times: v1 bought land
+without buying labor to work it (lost money net -- unwatered tiles turn to
+weeds, wasting seed cost). A follow-up attempt paired land with
+quadrant-scaled hiring and fixed a cash-reserve bug (it kept hiring even at
+near-zero money, starving out seed restocking), but even the fixed version
+scored lower than staying in the single starting quadrant with hands maxed
+out (~$5.2-5.4k vs ~$6.2-6.5k final money over 10 episodes each, see
+README): the market's price decays with supply (TOMATO's curve saturates
+around 200 units/24 days) and land capex doesn't pay back inside a 30-day
+season. Left as a documented dead end, not a TODO.
 """
 
 TARGET_CROP = "TOMATO"
-SEED_RESTOCK = 5
-# Land/hands are deliberately NOT bought yet: expanding the patrol area
-# without more hands to work it means more tiles go unwatered -> weeds ->
-# wasted seed money, which measurably lost more than it earned (see README).
+HANDS_CAP = 4  # hands hired per day -> up to 5 total workers (farmer + hands)
+SEED_BUFFER_PER_WORKER = 2
 
 
 def _snake_positions(size):
@@ -24,15 +35,27 @@ def _snake_positions(size):
             yield x, y
 
 
-def _next_target_tile(tiles, fx, fy):
+def _workable_positions(tiles):
     size = len(tiles)
-    positions = list(_snake_positions(size))
-    start = positions.index((fx, fy)) if (fx, fy) in positions else 0
-    ordered = positions[start:] + positions[:start]
+    return [(x, y) for x, y in _snake_positions(size) if tiles[y][x] != "LOCKED"]
+
+
+def _band_for_worker(positions, worker_idx, num_workers):
+    if not positions:
+        return []
+    chunk = max(1, len(positions) // num_workers)
+    start = worker_idx * chunk
+    end = len(positions) if worker_idx == num_workers - 1 else start + chunk
+    return positions[start:end]
+
+
+def _next_target_in_band(tiles, band, px, py):
+    if not band:
+        return px, py, "none"
+    start = band.index((px, py)) if (px, py) in band else 0
+    ordered = band[start:] + band[:start]
     for x, y in ordered:
         t = tiles[y][x]
-        if t == "LOCKED":
-            continue
         if t is None:
             return x, y, "empty"
         if isinstance(t, dict) and t.get("kind") == "PLANT":
@@ -40,7 +63,7 @@ def _next_target_tile(tiles, fx, fy):
                 return x, y, "ripe"
             if not t.get("watered_today", False):
                 return x, y, "thirsty"
-    return fx, fy, "none"
+    return band[0][0], band[0][1], "none"
 
 
 def _step_toward(fx, fy, tx, ty):
@@ -55,6 +78,28 @@ def _step_toward(fx, fy, tx, ty):
     return None
 
 
+def _worker_action(tiles, band, pos, seeds_available):
+    px, py = pos
+    tx, ty, state = _next_target_in_band(tiles, band, px, py)
+    if (px, py) == (tx, ty):
+        if state == "ripe":
+            return ["HARVEST"]
+        if state == "thirsty":
+            return ["WATER"]
+        if state == "empty" and seeds_available:
+            return ["PLANT", TARGET_CROP]
+        return ["PASS"]
+    move = _step_toward(px, py, tx, ty)
+    return [move] if move else ["PASS"]
+
+
+def _fib(n):
+    a, b = 1, 1
+    for _ in range(n):
+        a, b = b, a + b
+    return a
+
+
 def agent(obs):
     farms = obs.get("farms", [])
     player = obs.get("player", 0)
@@ -66,32 +111,50 @@ def agent(obs):
     fx, fy = farm["farmer"]
     tiles = farm["tiles"]
     money = farm["money"]
+    hour = obs.get("hour", 0)
+    hires_today = farm.get("hires_today", 0)
     seeds = private.get("seeds", {})
     shed = private.get("shed", {})
+    hand_positions = [tuple(p) for p in farm.get("hands", [])]
+    num_workers = 1 + len(hand_positions)
 
     market = []
+
+    # Re-hire the day's hands at the very start of the day -- cheap (first
+    # few hires cost $1-3) since the env wipes hands and hire cost at EOD.
+    if hour == 0:
+        n = hires_today
+        budget = money * 0.5  # never spend more than half the morning's cash on labor
+        spent = 0
+        hired = 0
+        while hired < HANDS_CAP:
+            cost = _fib(n)
+            if spent + cost > budget:
+                break
+            spent += cost
+            n += 1
+            hired += 1
+        market.extend([["HIRE"]] * hired)
+
     for item, qty in shed.items():
         if qty > 0:
             market.append(["SELL", item, qty])
 
-    if seeds.get(TARGET_CROP, 0) == 0 and money >= 50:
-        market.append(["BUY_SEED", TARGET_CROP, SEED_RESTOCK])
+    seed_target = max(1, num_workers) * SEED_BUFFER_PER_WORKER
+    have = seeds.get(TARGET_CROP, 0)
+    if have < seed_target and money >= 50:
+        market.append(["BUY_SEED", TARGET_CROP, seed_target - have])
 
     market = market[:10]
 
-    tx, ty, state = _next_target_tile(tiles, fx, fy)
-    if (fx, fy) == (tx, ty):
-        if state == "ripe":
-            farmer = ["HARVEST"]
-        elif state == "thirsty":
-            farmer = ["WATER"]
-        elif state == "empty" and seeds.get(TARGET_CROP, 0) > 0:
-            farmer = ["PLANT", TARGET_CROP]
-        else:
-            farmer = ["PASS"]
-    else:
-        move = _step_toward(fx, fy, tx, ty)
-        farmer = [move] if move else ["PASS"]
+    positions = _workable_positions(tiles)
+    farmer_band = _band_for_worker(positions, 0, num_workers)
+    seeds_available = seeds.get(TARGET_CROP, 0) > 0
+    farmer_action = _worker_action(tiles, farmer_band, (fx, fy), seeds_available)
 
-    hands = [["PASS"] for _ in farm.get("hands", [])]
-    return {"farmer": farmer, "hands": hands, "market": market}
+    hands_actions = []
+    for i, hp in enumerate(hand_positions, start=1):
+        band = _band_for_worker(positions, i, num_workers)
+        hands_actions.append(_worker_action(tiles, band, hp, seeds_available))
+
+    return {"farmer": farmer_action, "hands": hands_actions, "market": market}
