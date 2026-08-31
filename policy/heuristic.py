@@ -1,28 +1,38 @@
 """Rule-based Kaggriculture agent.
 
-v5: farmer + hired hands each patrol their own band of tiles in a snake
+v6: farmer + hired hands each patrol their own band of tiles in a snake
 pattern; at each tile: harvest if ripe, water if thirsty, dig if spent/weed,
-else plant the target crop if seed is held. Sells are throttled to 1 unit/
-turn rather than dumping the whole shed at once (see SELL_THROTTLE).
+else plant that worker's assigned crop if seed is held. Sells are throttled
+to 1 unit/turn rather than dumping the whole shed at once (SELL_THROTTLE).
 
 Crop choice was the single biggest lever found: MELON ($250 base price, one
 shot, max_yield=6) beats TOMATO ($60 base price, ongoing, max_yield=4) by
-more than 3x in final money, even though both crops cap out at a similar
-few-units-per-tile yield -- MELON's per-unit price dominates. Reaching that
-number required fixing a real correctness bug along the way: a one-shot
-crop starts at yield_units=1 immediately on planting (see kaggriculture.py's
-_new_plant), so the "ripe" check has to also gate on age >= first_yield_day,
-or the agent wastes every turn on a HARVEST the env silently no-ops until
-maturity instead of watering for the bonus-yield window.
+more than 3x in final money on its own, even though both crops cap out at a
+similar few-units-per-tile yield -- MELON's per-unit price dominates.
+Reaching that number required fixing a real correctness bug along the way:
+a one-shot crop starts at yield_units=1 immediately on planting (see
+kaggriculture.py's _new_plant), so the "ripe" check has to also gate on
+age >= first_yield_day, or the agent wastes every turn on a HARVEST the env
+silently no-ops until maturity instead of watering for the bonus-yield
+window.
 
-The second lever, smaller but real: MELON's harvests come in large lumps
-(one worker's whole band matures together), and dumping 30-85 units in one
-SELL order walks down the market's quadratic above-I0 price curve hard
-(~$226 avg realized vs $250 base for an 85-unit dump, confirmed directly
-against market_price()). Throttling every SELL to 1 unit/turn -- still a
-full sell-through by game end -- was strictly better across every value
-swept (1/2/3/5/10/15/20/30), consistent with the market's slow per-day
-consumption recovering between smaller sells.
+The second lever: MELON's harvests come in large lumps (one worker's whole
+band matures together), and dumping 30-85 units in one SELL order walks
+down the market's quadratic above-I0 price curve hard (~$226 avg realized
+vs $250 base for an 85-unit dump, confirmed directly against
+market_price()). Throttling every SELL to 1 unit/turn was strictly better
+across every value swept (1/2/3/5/10/15/20/30).
+
+The third and biggest-yet lever: even throttled, all-MELON production
+(~168 units/season from a full 25-tile quadrant) still saturates MELON's
+own market -- realized sell price tracked from ~$272 (early, scarcity
+premium) down to ~$51 (late, oversupply) over one game, confirmed by
+logging the observed price at every SELL. CROP_MIX splits workers across
+TWO crops (5 MELON : 2 TOMATO of 7 total) so production doesn't all land in
+the same market. Swept every split from 6:1 to 3:4 plus two 3-crop mixes
+adding STRAWBERRY -- 5:2 MELON:TOMATO was the clear peak (~$31.3k mean vs
+pure-MELON's ~$27.6k), not monotonic with the ratio (6:1 actually scored
+*below* pure MELON), so this was swept empirically, not derived analytically.
 
 Hands are re-hired every day (the env wipes farm["hands"], the farmer's
 position, carried inventories, and hire cost at end-of-day) so the agent
@@ -44,11 +54,21 @@ new evidence:
   reaches the cap faster, never raises it. Net-negative once travel/
   purchase overhead is counted.
 - WHEAT instead of MELON: much faster cycle (first_yield_day=2 vs 10) but
-  25x lower base price ($25 vs $250) isn't compensated by the extra cycles
-  -- scored well below MELON.
+  25x lower base price ($25 vs $250) isn't compensated by the extra cycles.
+- STRAWBERRY instead of MELON: scored ~$20.5-22.2k, well below MELON, and
+  adding it as a third crop to the mix (4:2:1 or 5:1:1) also underperformed
+  the clean 2-crop 5:2 split.
+- Reducing HANDS_CAP during MELON's pre-harvest dry spell (labor looked
+  idle, so tried hiring fewer hands days 0-7): scored lower, not higher --
+  those early hands are doing essential planting/watering setup for tiles
+  that mature later, not sitting idle.
 """
 
-TARGET_CROP = "MELON"
+# Split workers across two crops (5:2) so production doesn't all land in
+# one market and crash its own price -- see docstring. Swept empirically,
+# not derived: the ratio matters and isn't monotonic (6:1 underperforms
+# even pure MELON).
+CROP_MIX = ["MELON"] * 5 + ["TOMATO"] * 2
 HANDS_CAP = 6  # hands hired per day -> up to 7 total workers (farmer + hands).
 # Swept 2/4/6/8 for MELON: results were close (~26.3-27.1k) and not
 # monotonic -- MELON's economics (labor mostly idles during the 10-12 day
@@ -79,12 +99,6 @@ CROP_INFO = {
     "TOMATO": {"seed": 50, "first_yield_day": 8, "max_yield_day": 8, "interval": 1, "max_yield": 4, "ongoing": True},
     "MELON": {"seed": 80, "first_yield_day": 10, "max_yield_day": 12, "interval": 0, "max_yield": 6, "ongoing": False},
 }
-_CROP = CROP_INFO[TARGET_CROP]
-# Ongoing crops only: after this age all production ticks are used up and
-# the tile produces nothing more, ever -- left alone it decays into a weed.
-# Dig it at that point and replant instead of wasting the tile. (One-shot
-# crops don't need this: HARVEST clears the tile automatically.)
-CROP_EXHAUST_AGE = _CROP["first_yield_day"] + (_CROP["max_yield"] - 1) * max(1, _CROP["interval"])
 
 
 def _snake_positions(size):
@@ -108,11 +122,16 @@ def _band_for_worker(positions, worker_idx, num_workers):
     return positions[start:end]
 
 
-def _next_target_in_band(tiles, band, px, py, day):
+def _crop_exhaust_age(crop_info):
+    return crop_info["first_yield_day"] + (crop_info["max_yield"] - 1) * max(1, crop_info["interval"])
+
+
+def _next_target_in_band(tiles, band, px, py, day, crop_info):
     if not band:
         return px, py, "none"
     start = band.index((px, py)) if (px, py) in band else 0
     ordered = band[start:] + band[:start]
+    exhaust_age = _crop_exhaust_age(crop_info)
     for x, y in ordered:
         t = tiles[y][x]
         if t is None:
@@ -121,12 +140,12 @@ def _next_target_in_band(tiles, band, px, py, day):
             return x, y, "weed"
         if isinstance(t, dict) and t.get("kind") == "PLANT":
             age = day - t.get("planted_day", day)
-            mature = _CROP["ongoing"] or age >= _CROP["first_yield_day"]
+            mature = crop_info["ongoing"] or age >= crop_info["first_yield_day"]
             if mature and t.get("yield_units", 0) > 0:
                 return x, y, "ripe"
             if not t.get("watered_today", False):
                 return x, y, "thirsty"
-            if _CROP["ongoing"] and age >= CROP_EXHAUST_AGE:
+            if crop_info["ongoing"] and age >= exhaust_age:
                 # Fully spent -- all production ticks already used up, it'll
                 # just decay into a weed if left alone. Clear it to replant.
                 return x, y, "spent"
@@ -145,9 +164,9 @@ def _step_toward(fx, fy, tx, ty):
     return None
 
 
-def _worker_action(tiles, band, pos, seeds_available, day):
+def _worker_action(tiles, band, pos, seeds_available, day, crop, crop_info):
     px, py = pos
-    tx, ty, state = _next_target_in_band(tiles, band, px, py, day)
+    tx, ty, state = _next_target_in_band(tiles, band, px, py, day, crop_info)
     if (px, py) == (tx, ty):
         if state == "ripe":
             return ["HARVEST"]
@@ -156,7 +175,7 @@ def _worker_action(tiles, band, pos, seeds_available, day):
         if state in ("spent", "weed"):
             return ["DIG"]
         if state == "empty" and seeds_available:
-            return ["PLANT", TARGET_CROP]
+            return ["PLANT", crop]
         return ["PASS"]
     move = _step_toward(px, py, tx, ty)
     return [move] if move else ["PASS"]
@@ -209,22 +228,34 @@ def agent(obs):
         if qty > 0:
             market.append(["SELL", item, min(qty, SELL_THROTTLE)])
 
-    seed_target = max(1, num_workers) * SEED_BUFFER_PER_WORKER
-    have = seeds.get(TARGET_CROP, 0)
-    if have < seed_target and money >= _CROP["seed"]:
-        market.append(["BUY_SEED", TARGET_CROP, seed_target - have])
+    worker_crops = [CROP_MIX[i % len(CROP_MIX)] for i in range(num_workers)]
+    crops_in_use = set(worker_crops)
+    for crop in crops_in_use:
+        crop_info = CROP_INFO[crop]
+        workers_on_crop = worker_crops.count(crop)
+        seed_target = max(1, workers_on_crop) * SEED_BUFFER_PER_WORKER
+        have = seeds.get(crop, 0)
+        if have < seed_target and money >= crop_info["seed"]:
+            market.append(["BUY_SEED", crop, seed_target - have])
 
     market = market[:10]
 
     day = obs.get("day", 0)
     positions = _workable_positions(tiles)
+    farmer_crop = worker_crops[0]
     farmer_band = _band_for_worker(positions, 0, num_workers)
-    seeds_available = seeds.get(TARGET_CROP, 0) > 0
-    farmer_action = _worker_action(tiles, farmer_band, (fx, fy), seeds_available, day)
+    farmer_seeds_available = seeds.get(farmer_crop, 0) > 0
+    farmer_action = _worker_action(
+        tiles, farmer_band, (fx, fy), farmer_seeds_available, day, farmer_crop, CROP_INFO[farmer_crop]
+    )
 
     hands_actions = []
     for i, hp in enumerate(hand_positions, start=1):
         band = _band_for_worker(positions, i, num_workers)
-        hands_actions.append(_worker_action(tiles, band, hp, seeds_available, day))
+        hand_crop = worker_crops[i]
+        hand_seeds_available = seeds.get(hand_crop, 0) > 0
+        hands_actions.append(
+            _worker_action(tiles, band, hp, hand_seeds_available, day, hand_crop, CROP_INFO[hand_crop])
+        )
 
     return {"farmer": farmer_action, "hands": hands_actions, "market": market}
