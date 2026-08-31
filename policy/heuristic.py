@@ -24,7 +24,10 @@ season. Left as a documented dead end, not a TODO.
 """
 
 TARGET_CROP = "TOMATO"
-HANDS_CAP = 4  # hands hired per day -> up to 5 total workers (farmer + hands)
+HANDS_CAP = 4  # hands hired per day -> up to 5 total workers (farmer + hands).
+# Swept 4/6/8 empirically: 4 wins -- more workers crowd a fixed-size
+# quadrant into smaller bands, and hire cost outpaces the marginal tile
+# throughput without more land to justify it.
 SEED_BUFFER_PER_WORKER = 2
 # TOMATO: first_yield_day=8, interval=1, max_yield=4 production ticks (env
 # defaults) -- after day planted_day + 8 + (4-1)*1 = +11, all 4 ticks are
