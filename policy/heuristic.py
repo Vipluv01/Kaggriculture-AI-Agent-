@@ -1,41 +1,51 @@
 """Rule-based Kaggriculture agent.
 
-v4: farmer + hired hands each patrol their own band of tiles in a snake
+v5: farmer + hired hands each patrol their own band of tiles in a snake
 pattern; at each tile: harvest if ripe, water if thirsty, dig if spent/weed,
-else plant the target crop if seed is held.
+else plant the target crop if seed is held. Sells are throttled to 1 unit/
+turn rather than dumping the whole shed at once (see SELL_THROTTLE).
 
 Crop choice was the single biggest lever found: MELON ($250 base price, one
 shot, max_yield=6) beats TOMATO ($60 base price, ongoing, max_yield=4) by
-more than 3x in final money (~$27k vs ~$8k), even though both crops cap out
-at a similar few-units-per-tile yield -- MELON's per-unit price dominates.
-Reaching that number required fixing a real correctness bug along the way:
-a one-shot crop starts at yield_units=1 immediately on planting (see
-kaggriculture.py's _new_plant), so the "ripe" check has to also gate on
-age >= first_yield_day, or the agent wastes every turn on a HARVEST the env
-silently no-ops until maturity instead of watering for the bonus-yield
-window.
+more than 3x in final money, even though both crops cap out at a similar
+few-units-per-tile yield -- MELON's per-unit price dominates. Reaching that
+number required fixing a real correctness bug along the way: a one-shot
+crop starts at yield_units=1 immediately on planting (see kaggriculture.py's
+_new_plant), so the "ripe" check has to also gate on age >= first_yield_day,
+or the agent wastes every turn on a HARVEST the env silently no-ops until
+maturity instead of watering for the bonus-yield window.
+
+The second lever, smaller but real: MELON's harvests come in large lumps
+(one worker's whole band matures together), and dumping 30-85 units in one
+SELL order walks down the market's quadratic above-I0 price curve hard
+(~$226 avg realized vs $250 base for an 85-unit dump, confirmed directly
+against market_price()). Throttling every SELL to 1 unit/turn -- still a
+full sell-through by game end -- was strictly better across every value
+swept (1/2/3/5/10/15/20/30), consistent with the market's slow per-day
+consumption recovering between smaller sells.
 
 Hands are re-hired every day (the env wipes farm["hands"], the farmer's
 position, carried inventories, and hire cost at end-of-day) so the agent
 hires HANDS_CAP fresh hands each morning (hour 0) -- cheap, since the first
 few hires of a day cost $1-3 each.
 
-Two things tried and dropped, both documented so they don't get
-re-litigated without new evidence:
-- Land expansion (twice): v1 bought land without buying labor to work it
-  (lost money net -- unwatered tiles turn to weeds, wasting seed cost). A
-  follow-up paired land with quadrant-scaled hiring and fixed a real
-  cash-reserve bug (it kept hiring even at near-zero money, starving out
-  seed restocking), but even fixed it scored lower than staying in the
-  single starting quadrant with hands maxed: the market's price decays with
-  supply and land capex doesn't pay back inside a 30-day season.
-- Fertilizer: buy it, have a worker fetch it from the shed and apply it.
-  Implemented correctly (including fixing a bug where the generic "sell
-  everything in the shed" loop was reselling the fertilizer before any
-  worker could pick it up) -- but re-reading kaggriculture.py showed the
-  fertilizer bonus is capped by the same `min(max_yield, ...)` as ordinary
-  production: it only reaches the yield cap *faster*, it never raises the
-  cap. Confirmed net-negative once travel/purchase overhead is counted.
+Things tried and dropped, documented so they don't get re-litigated without
+new evidence:
+- Land expansion, tried three times: v1 without extra labor (lost money net
+  -- unwatered tiles turn to weeds). A fixed version with quadrant-scaled
+  hiring under TOMATO still scored lower than the single quadrant. Retested
+  under MELON specifically (higher per-unit price seemed like it might
+  change the math) -- worse again, and by more: MELON's own 10-12 day
+  pre-harvest dry spell compounds with a second quadrant's own ramp-up,
+  leaving too little season left to pay back the capex.
+- Fertilizer: implemented correctly (including fixing a bug where the
+  generic "sell everything" loop was reselling it before pickup) -- but its
+  bonus is capped by the same `min(max_yield, ...)` as ordinary production:
+  reaches the cap faster, never raises it. Net-negative once travel/
+  purchase overhead is counted.
+- WHEAT instead of MELON: much faster cycle (first_yield_day=2 vs 10) but
+  25x lower base price ($25 vs $250) isn't compensated by the extra cycles
+  -- scored well below MELON.
 """
 
 TARGET_CROP = "MELON"
@@ -45,6 +55,14 @@ HANDS_CAP = 6  # hands hired per day -> up to 7 total workers (farmer + hands).
 # pre-harvest dry spell, then a couple of huge lump-sum harvests) make labor
 # count matter far less than for TOMATO. 6 scored best of those tested.
 SEED_BUFFER_PER_WORKER = 2
+SELL_THROTTLE = 1  # cap units sold per turn -- large one-shot dumps (a
+# harvest wave of 30-85 MELON at once, confirmed empirically) walk down the
+# quadratic above-I0 price curve hard (avg realized price ~$226 vs $250 base
+# for an 85-unit dump). Swept 1/2/3/5/10/15/20/30: strictly monotonic, lower
+# always wins -- selling 1/turn (every turn, so still a full sell-through by
+# game end: confirmed 0 units stranded in the shed at the final step) lets
+# the market's slow daily consumption (-1 unit/day for MELON) recover
+# between each unit instead of quoting many units against the same dump.
 
 # Mirrors kaggle_environments' CROPS table (kaggriculture.py) for the two
 # crops this agent knows how to farm -- kept local since the submission
@@ -189,7 +207,7 @@ def agent(obs):
 
     for item, qty in shed.items():
         if qty > 0:
-            market.append(["SELL", item, qty])
+            market.append(["SELL", item, min(qty, SELL_THROTTLE)])
 
     seed_target = max(1, num_workers) * SEED_BUFFER_PER_WORKER
     have = seeds.get(TARGET_CROP, 0)
