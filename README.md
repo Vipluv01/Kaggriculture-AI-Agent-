@@ -37,34 +37,50 @@ tar -czf submission.tar.gz main.py policy/
 
 ## Status
 
-v3 heuristic (`policy/heuristic.py`): v2 (farmer + up to 4 hired hands, re-hired every
-morning since hands and hire cost both reset daily, each snake-scanning their own band of
-the starting quadrant) plus digging and replanting spent tiles. TOMATO is "ongoing" but
-not infinite — it produces for exactly 4 ticks starting 8 days after planting, then stops
-producing forever and just decays into a weed if left alone. v2 never dug a spent tile, so
-most tiles only got farmed once across the whole 30-day season; v3 detects
-`day - planted_day >= 11` (all 4 ticks used) or an actual weed tile and digs it to replant.
-That alone was worth ~$2k in mean final money (see table) — bigger than any of the
-land-expansion attempts below.
+v4 heuristic (`policy/heuristic.py`) — current best, submitted. Progression:
 
-Land expansion was tried **twice** and dropped both times:
-- v1 bought land with no extra labor to work it — lost money net (unwatered tiles ->
-  weeds -> wasted seed cost, land cost itself ate working capital).
-- A v3 attempt paired land with hiring scaled to quadrants owned, and fixed a real bug
-  along the way (it kept hiring even at near-zero money, starving out seed restocking
-  and spiraling down) — but even fixed, it scored *lower* than staying single-quadrant
-  with hands maxed out (~$5.2-5.4k vs ~$6.2-6.5k). The market's price decays with supply
-  (TOMATO's curve saturates around 200 units/24 days) and land capex doesn't pay back
-  inside a 30-day season. Documented as a dead end in the module docstring, not a TODO.
+| version | change | mean $ (10 episodes/opponent) |
+|---|---|---|
+| v1 | single farmer, single quadrant, TOMATO | ~4.6-4.8k |
+| v2 | +4 hired hands/day, band-patrol | ~5.8-6.2k |
+| v3 | +dig & replant spent tiles | ~7.7-9.8k |
+| v4 | **crop swap: MELON instead of TOMATO** + HANDS_CAP retuned to 6 | **~27k** |
+
+By far the biggest single lever was crop choice, not any behavioral change: MELON's base
+price ($250) is ~4x TOMATO's ($60), and both crops cap out at a similar few-units-per-tile
+total yield, so the higher-value crop wins by roughly that same multiple. Real ladder
+scores confirm the trend so far: v1 scored 328.2, v2 scored 600.0 (both `COMPLETE`).
+
+Getting MELON working correctly required fixing a real bug: a one-shot crop's tile starts
+at `yield_units=1` immediately on planting (env internals, `_new_plant`), so a naive
+"yield_units > 0 means ripe" check fires HARVEST from turn one — the env silently no-ops
+that until `first_yield_day`, but every turn spent on a doomed HARVEST is a turn not spent
+watering for the bonus-yield window. Ripe now also gates on `age >= first_yield_day` for
+non-ongoing crops.
+
+Two things tried and explicitly rejected (see the module docstring for full detail, so
+they don't get re-litigated without new evidence):
+- **Land expansion**, twice — even after fixing a real cash-reserve bug on the second
+  attempt, it scored lower than staying in the single starting quadrant. Market price
+  decays with supply and land capex doesn't pay back inside a 30-day season.
+- **Fertilizer** — implemented correctly (including fixing a bug where the generic
+  "sell everything in the shed" loop was reselling the fertilizer before a worker could
+  pick it up), but re-reading the env source showed its yield bonus is capped by the same
+  `min(max_yield, ...)` as ordinary production — it only reaches the cap *faster*, never
+  raises it. Net-negative once travel/purchase overhead is counted.
 
 Current results (`scripts/evaluate.py`, 10 episodes each, alternating sides), full 720-turn season:
 
 | opponent | our mean $ | their mean $ | win rate |
 |---|---|---|---|
-| pass   | 8201 | 3000 | 10/10 |
-| random | 7748 |   10 | 10/10 |
-| starter| 8010 | 3472 | 10/10 |
+| pass   | 27073 | 3000 | 10/10 |
+| random | 27073 |   59 | 10/10 |
+| starter| 27073 | 3551 | 10/10 |
 
-Next, if there's time: STRAWBERRY/animal income mix once capital allows (higher per-unit
-price may sidestep TOMATO's price-saturation ceiling without needing more land), or the
-recorded-episode datasets on Kaggle/HF for imitation learning if the heuristic plateaus.
+(Our mean is identical to 1 decimal across opponents/episodes — verified this isn't a bug:
+MELON revenue is dominated by two large lump-sum harvest+sell waves around day 12 and day
+22, and neither the opponent's actions nor weed-spawn RNG meaningfully perturb that.)
+
+Next, if there's time: try STRAWBERRY (also one-shot-adjacent pricing tier, $120 base) or
+MELON+TOMATO mixed planting to smooth the ~10-day zero-income ramp before the first
+harvest; or the recorded-episode datasets on Kaggle/HF for imitation learning.

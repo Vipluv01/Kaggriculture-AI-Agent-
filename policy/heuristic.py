@@ -1,40 +1,72 @@
 """Rule-based Kaggriculture agent.
 
-v2: farmer + hired hands each patrol their own band of tiles in a snake
-pattern; at each tile: harvest if ripe, water if thirsty, else plant the
-target crop if seed is held. TOMATO is the default crop: moderate seed cost
-(50), ongoing yield (produces repeatedly once mature) beats a one-shot crop
-like the "starter" baseline's CARROT loop once several tiles are in rotation.
+v4: farmer + hired hands each patrol their own band of tiles in a snake
+pattern; at each tile: harvest if ripe, water if thirsty, dig if spent/weed,
+else plant the target crop if seed is held.
 
-Hands are re-hired every day (the env wipes farm["hands"] and resets the
-Fibonacci hire-cost counter at end-of-day) so the agent hires HANDS_CAP fresh
-hands each morning (hour 0) -- cheap, since the first few hires of a day cost
-$1-3 each.
+Crop choice was the single biggest lever found: MELON ($250 base price, one
+shot, max_yield=6) beats TOMATO ($60 base price, ongoing, max_yield=4) by
+more than 3x in final money (~$27k vs ~$8k), even though both crops cap out
+at a similar few-units-per-tile yield -- MELON's per-unit price dominates.
+Reaching that number required fixing a real correctness bug along the way:
+a one-shot crop starts at yield_units=1 immediately on planting (see
+kaggriculture.py's _new_plant), so the "ripe" check has to also gate on
+age >= first_yield_day, or the agent wastes every turn on a HARVEST the env
+silently no-ops until maturity instead of watering for the bonus-yield
+window.
 
-Land expansion was tried twice and dropped both times: v1 bought land
-without buying labor to work it (lost money net -- unwatered tiles turn to
-weeds, wasting seed cost). A follow-up attempt paired land with
-quadrant-scaled hiring and fixed a cash-reserve bug (it kept hiring even at
-near-zero money, starving out seed restocking), but even the fixed version
-scored lower than staying in the single starting quadrant with hands maxed
-out (~$5.2-5.4k vs ~$6.2-6.5k final money over 10 episodes each, see
-README): the market's price decays with supply (TOMATO's curve saturates
-around 200 units/24 days) and land capex doesn't pay back inside a 30-day
-season. Left as a documented dead end, not a TODO.
+Hands are re-hired every day (the env wipes farm["hands"], the farmer's
+position, carried inventories, and hire cost at end-of-day) so the agent
+hires HANDS_CAP fresh hands each morning (hour 0) -- cheap, since the first
+few hires of a day cost $1-3 each.
+
+Two things tried and dropped, both documented so they don't get
+re-litigated without new evidence:
+- Land expansion (twice): v1 bought land without buying labor to work it
+  (lost money net -- unwatered tiles turn to weeds, wasting seed cost). A
+  follow-up paired land with quadrant-scaled hiring and fixed a real
+  cash-reserve bug (it kept hiring even at near-zero money, starving out
+  seed restocking), but even fixed it scored lower than staying in the
+  single starting quadrant with hands maxed: the market's price decays with
+  supply and land capex doesn't pay back inside a 30-day season.
+- Fertilizer: buy it, have a worker fetch it from the shed and apply it.
+  Implemented correctly (including fixing a bug where the generic "sell
+  everything in the shed" loop was reselling the fertilizer before any
+  worker could pick it up) -- but re-reading kaggriculture.py showed the
+  fertilizer bonus is capped by the same `min(max_yield, ...)` as ordinary
+  production: it only reaches the yield cap *faster*, it never raises the
+  cap. Confirmed net-negative once travel/purchase overhead is counted.
 """
 
-TARGET_CROP = "TOMATO"
-HANDS_CAP = 4  # hands hired per day -> up to 5 total workers (farmer + hands).
-# Swept 4/6/8 empirically: 4 wins -- more workers crowd a fixed-size
-# quadrant into smaller bands, and hire cost outpaces the marginal tile
-# throughput without more land to justify it.
+TARGET_CROP = "MELON"
+HANDS_CAP = 6  # hands hired per day -> up to 7 total workers (farmer + hands).
+# Swept 2/4/6/8 for MELON: results were close (~26.3-27.1k) and not
+# monotonic -- MELON's economics (labor mostly idles during the 10-12 day
+# pre-harvest dry spell, then a couple of huge lump-sum harvests) make labor
+# count matter far less than for TOMATO. 6 scored best of those tested.
 SEED_BUFFER_PER_WORKER = 2
-# TOMATO: first_yield_day=8, interval=1, max_yield=4 production ticks (env
-# defaults) -- after day planted_day + 8 + (4-1)*1 = +11, all 4 ticks are
-# used up and the tile produces nothing more, ever; left alone it just
-# decays into a weed. Dig it at that point and replant instead of wasting
-# the tile.
-TOMATO_EXHAUST_AGE = 8 + (4 - 1) * 1
+
+# Mirrors kaggle_environments' CROPS table (kaggriculture.py) for the two
+# crops this agent knows how to farm -- kept local since the submission
+# can't import the env package.
+#   ongoing crops (TOMATO) produce repeated small ticks and start at
+#   yield_units=0, so "yield_units > 0" alone means ripe.
+#   one-shot crops (MELON) start at yield_units=1 immediately on planting
+#   (see kaggriculture.py's _new_plant), so a naive "yield_units > 0" check
+#   fires HARVEST from turn 1 -- the env silently no-ops that until
+#   first_yield_day, but every turn wasted on a failing HARVEST is a turn
+#   not spent watering for the bonus-yield window. Ripe must also gate on
+#   age >= first_yield_day for these.
+CROP_INFO = {
+    "TOMATO": {"seed": 50, "first_yield_day": 8, "max_yield_day": 8, "interval": 1, "max_yield": 4, "ongoing": True},
+    "MELON": {"seed": 80, "first_yield_day": 10, "max_yield_day": 12, "interval": 0, "max_yield": 6, "ongoing": False},
+}
+_CROP = CROP_INFO[TARGET_CROP]
+# Ongoing crops only: after this age all production ticks are used up and
+# the tile produces nothing more, ever -- left alone it decays into a weed.
+# Dig it at that point and replant instead of wasting the tile. (One-shot
+# crops don't need this: HARVEST clears the tile automatically.)
+CROP_EXHAUST_AGE = _CROP["first_yield_day"] + (_CROP["max_yield"] - 1) * max(1, _CROP["interval"])
 
 
 def _snake_positions(size):
@@ -70,12 +102,13 @@ def _next_target_in_band(tiles, band, px, py, day):
         if isinstance(t, dict) and t.get("kind") == "WEED":
             return x, y, "weed"
         if isinstance(t, dict) and t.get("kind") == "PLANT":
-            if t.get("yield_units", 0) > 0:
+            age = day - t.get("planted_day", day)
+            mature = _CROP["ongoing"] or age >= _CROP["first_yield_day"]
+            if mature and t.get("yield_units", 0) > 0:
                 return x, y, "ripe"
             if not t.get("watered_today", False):
                 return x, y, "thirsty"
-            age = day - t.get("planted_day", day)
-            if age >= TOMATO_EXHAUST_AGE:
+            if _CROP["ongoing"] and age >= CROP_EXHAUST_AGE:
                 # Fully spent -- all production ticks already used up, it'll
                 # just decay into a weed if left alone. Clear it to replant.
                 return x, y, "spent"
@@ -160,7 +193,7 @@ def agent(obs):
 
     seed_target = max(1, num_workers) * SEED_BUFFER_PER_WORKER
     have = seeds.get(TARGET_CROP, 0)
-    if have < seed_target and money >= 50:
+    if have < seed_target and money >= _CROP["seed"]:
         market.append(["BUY_SEED", TARGET_CROP, seed_target - have])
 
     market = market[:10]
