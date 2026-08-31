@@ -26,6 +26,12 @@ season. Left as a documented dead end, not a TODO.
 TARGET_CROP = "TOMATO"
 HANDS_CAP = 4  # hands hired per day -> up to 5 total workers (farmer + hands)
 SEED_BUFFER_PER_WORKER = 2
+# TOMATO: first_yield_day=8, interval=1, max_yield=4 production ticks (env
+# defaults) -- after day planted_day + 8 + (4-1)*1 = +11, all 4 ticks are
+# used up and the tile produces nothing more, ever; left alone it just
+# decays into a weed. Dig it at that point and replant instead of wasting
+# the tile.
+TOMATO_EXHAUST_AGE = 8 + (4 - 1) * 1
 
 
 def _snake_positions(size):
@@ -49,7 +55,7 @@ def _band_for_worker(positions, worker_idx, num_workers):
     return positions[start:end]
 
 
-def _next_target_in_band(tiles, band, px, py):
+def _next_target_in_band(tiles, band, px, py, day):
     if not band:
         return px, py, "none"
     start = band.index((px, py)) if (px, py) in band else 0
@@ -58,11 +64,18 @@ def _next_target_in_band(tiles, band, px, py):
         t = tiles[y][x]
         if t is None:
             return x, y, "empty"
+        if isinstance(t, dict) and t.get("kind") == "WEED":
+            return x, y, "weed"
         if isinstance(t, dict) and t.get("kind") == "PLANT":
             if t.get("yield_units", 0) > 0:
                 return x, y, "ripe"
             if not t.get("watered_today", False):
                 return x, y, "thirsty"
+            age = day - t.get("planted_day", day)
+            if age >= TOMATO_EXHAUST_AGE:
+                # Fully spent -- all production ticks already used up, it'll
+                # just decay into a weed if left alone. Clear it to replant.
+                return x, y, "spent"
     return band[0][0], band[0][1], "none"
 
 
@@ -78,14 +91,16 @@ def _step_toward(fx, fy, tx, ty):
     return None
 
 
-def _worker_action(tiles, band, pos, seeds_available):
+def _worker_action(tiles, band, pos, seeds_available, day):
     px, py = pos
-    tx, ty, state = _next_target_in_band(tiles, band, px, py)
+    tx, ty, state = _next_target_in_band(tiles, band, px, py, day)
     if (px, py) == (tx, ty):
         if state == "ripe":
             return ["HARVEST"]
         if state == "thirsty":
             return ["WATER"]
+        if state in ("spent", "weed"):
+            return ["DIG"]
         if state == "empty" and seeds_available:
             return ["PLANT", TARGET_CROP]
         return ["PASS"]
@@ -147,14 +162,15 @@ def agent(obs):
 
     market = market[:10]
 
+    day = obs.get("day", 0)
     positions = _workable_positions(tiles)
     farmer_band = _band_for_worker(positions, 0, num_workers)
     seeds_available = seeds.get(TARGET_CROP, 0) > 0
-    farmer_action = _worker_action(tiles, farmer_band, (fx, fy), seeds_available)
+    farmer_action = _worker_action(tiles, farmer_band, (fx, fy), seeds_available, day)
 
     hands_actions = []
     for i, hp in enumerate(hand_positions, start=1):
         band = _band_for_worker(positions, i, num_workers)
-        hands_actions.append(_worker_action(tiles, band, hp, seeds_available))
+        hands_actions.append(_worker_action(tiles, band, hp, seeds_available, day))
 
     return {"farmer": farmer_action, "hands": hands_actions, "market": market}

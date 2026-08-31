@@ -37,10 +37,15 @@ tar -czf submission.tar.gz main.py policy/
 
 ## Status
 
-v2 heuristic (`policy/heuristic.py`): farmer + up to 4 hired hands (re-hired every
-morning — hands and hire cost both reset daily) each snake-scan their own band of tiles
-in the starting quadrant, farming TOMATO (ongoing yield beats the built-in "starter"
-baseline's one-shot CARROT loop). Submitted as `55918263`.
+v3 heuristic (`policy/heuristic.py`): v2 (farmer + up to 4 hired hands, re-hired every
+morning since hands and hire cost both reset daily, each snake-scanning their own band of
+the starting quadrant) plus digging and replanting spent tiles. TOMATO is "ongoing" but
+not infinite — it produces for exactly 4 ticks starting 8 days after planting, then stops
+producing forever and just decays into a weed if left alone. v2 never dug a spent tile, so
+most tiles only got farmed once across the whole 30-day season; v3 detects
+`day - planted_day >= 11` (all 4 ticks used) or an actual weed tile and digs it to replant.
+That alone was worth ~$2k in mean final money (see table) — bigger than any of the
+land-expansion attempts below.
 
 Land expansion was tried **twice** and dropped both times:
 - v1 bought land with no extra labor to work it — lost money net (unwatered tiles ->
@@ -56,9 +61,9 @@ Current results (`scripts/evaluate.py`, 10 episodes each, alternating sides), fu
 
 | opponent | our mean $ | their mean $ | win rate |
 |---|---|---|---|
-| pass   | 5785 | 3000 | 10/10 |
-| random | 5815 |   21 | 10/10 |
-| starter| 6199 | 3554 | 10/10 |
+| pass   | 8201 | 3000 | 10/10 |
+| random | 7748 |   10 | 10/10 |
+| starter| 8010 | 3472 | 10/10 |
 
 Next, if there's time: STRAWBERRY/animal income mix once capital allows (higher per-unit
 price may sidestep TOMATO's price-saturation ceiling without needing more land), or the
