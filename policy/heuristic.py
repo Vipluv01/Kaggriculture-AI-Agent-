@@ -1,6 +1,6 @@
 """Rule-based Kaggriculture agent.
 
-v6: farmer + hired hands each patrol their own band of tiles in a snake
+v7: farmer + hired hands each patrol their own band of tiles in a snake
 pattern; at each tile: harvest if ripe, water if thirsty, dig if spent/weed,
 else plant that worker's assigned crop if seed is held. Sells are throttled
 to 1 unit/turn rather than dumping the whole shed at once (SELL_THROTTLE).
@@ -23,16 +23,26 @@ vs $250 base for an 85-unit dump, confirmed directly against
 market_price()). Throttling every SELL to 1 unit/turn was strictly better
 across every value swept (1/2/3/5/10/15/20/30).
 
-The third and biggest-yet lever: even throttled, all-MELON production
-(~168 units/season from a full 25-tile quadrant) still saturates MELON's
-own market -- realized sell price tracked from ~$272 (early, scarcity
-premium) down to ~$51 (late, oversupply) over one game, confirmed by
-logging the observed price at every SELL. CROP_MIX splits workers across
-TWO crops (5 MELON : 2 TOMATO of 7 total) so production doesn't all land in
-the same market. Swept every split from 6:1 to 3:4 plus two 3-crop mixes
-adding STRAWBERRY -- 5:2 MELON:TOMATO was the clear peak (~$31.3k mean vs
-pure-MELON's ~$27.6k), not monotonic with the ratio (6:1 actually scored
-*below* pure MELON), so this was swept empirically, not derived analytically.
+The third lever: even throttled, all-MELON production (~168 units/season
+from a full 25-tile quadrant) still saturates MELON's own market --
+realized sell price tracked from ~$272 (early, scarcity premium) down to
+~$51 (late, oversupply) over one game, confirmed by logging the observed
+price at every SELL. Splitting workers across a second crop so production
+doesn't all land in one market helped: 5:2 MELON:TOMATO was the peak of
+every 2-crop split swept (6:1 through 3:4, not monotonic -- 6:1 actually
+scored *below* pure MELON), ~$27.6k -> ~$31.3k.
+
+The fourth and biggest-yet lever: WHEAT turned out to be a much better
+*diversification partner* than TOMATO despite being a far worse crop on
+its own (see "dropped" below) -- 5:2 MELON:WHEAT beat 5:2 MELON:TOMATO
+(~$32.2k vs ~$31.3k), and a 3-way 5:1:1 MELON:TOMATO:WHEAT split beat both
+2-crop mixes again (~$32.6k). Swept empirically: 6:1/4:3/3:4 MELON:WHEAT
+ratios, MELON+CARROT+WHEAT, and MELON+TOMATO+CARROT 3-way mixes all scored
+lower than 5:1:1 MELON:TOMATO:WHEAT. A crop's value as a diversification
+slice is not the same question as its value as a sole crop -- WHEAT's fast,
+low-value cycle apparently smooths cash flow / avoids saturating any one
+market better than TOMATO's slower, higher-value one does, even though
+TOMATO alone clearly beats WHEAT alone.
 
 Hands are re-hired every day (the env wipes farm["hands"], the farmer's
 position, carried inventories, and hire cost at end-of-day) so the agent
@@ -56,24 +66,29 @@ new evidence:
 - WHEAT instead of MELON: much faster cycle (first_yield_day=2 vs 10) but
   25x lower base price ($25 vs $250) isn't compensated by the extra cycles.
 - STRAWBERRY instead of MELON: scored ~$20.5-22.2k, well below MELON, and
-  adding it as a third crop to the mix (4:2:1 or 5:1:1) also underperformed
-  the clean 2-crop 5:2 split.
+  adding it as a third crop to the MELON:TOMATO mix (4:2:1 or 5:1:1) also
+  underperformed the clean 2-crop 5:2 split (WHEAT, tried later, didn't).
 - Reducing HANDS_CAP during MELON's pre-harvest dry spell (labor looked
   idle, so tried hiring fewer hands days 0-7): scored lower, not higher --
   those early hands are doing essential planting/watering setup for tiles
   that mature later, not sitting idle.
+- Re-swept HANDS_CAP (4/5/6/8) and SELL_THROTTLE (2/3/5) under the v7
+  crop-mix specifically, in case the optimal values shifted once production
+  split across markets -- both confirmed unchanged from the pure-MELON
+  tuning.
 """
 
-# Split workers across two crops (5:2) so production doesn't all land in
-# one market and crash its own price -- see docstring. Swept empirically,
-# not derived: the ratio matters and isn't monotonic (6:1 underperforms
-# even pure MELON).
-CROP_MIX = ["MELON"] * 5 + ["TOMATO"] * 2
+# Split workers across three crops (5 MELON : 1 TOMATO : 1 WHEAT) so
+# production doesn't all land in one market and crash its own price -- see
+# docstring. Swept empirically, not derived: ratios and crop choice both
+# matter and aren't monotonic or predictable from each crop's solo value.
+CROP_MIX = ["MELON"] * 5 + ["TOMATO"] * 1 + ["WHEAT"] * 1
 HANDS_CAP = 6  # hands hired per day -> up to 7 total workers (farmer + hands).
 # Swept 2/4/6/8 for MELON: results were close (~26.3-27.1k) and not
 # monotonic -- MELON's economics (labor mostly idles during the 10-12 day
 # pre-harvest dry spell, then a couple of huge lump-sum harvests) make labor
-# count matter far less than for TOMATO. 6 scored best of those tested.
+# count matter far less than for TOMATO. 6 scored best of those tested, and
+# re-confirmed best again after the crop-mix change (see docstring).
 SEED_BUFFER_PER_WORKER = 2
 SELL_THROTTLE = 1  # cap units sold per turn -- large one-shot dumps (a
 # harvest wave of 30-85 MELON at once, confirmed empirically) walk down the
@@ -98,6 +113,8 @@ SELL_THROTTLE = 1  # cap units sold per turn -- large one-shot dumps (a
 CROP_INFO = {
     "TOMATO": {"seed": 50, "first_yield_day": 8, "max_yield_day": 8, "interval": 1, "max_yield": 4, "ongoing": True},
     "MELON": {"seed": 80, "first_yield_day": 10, "max_yield_day": 12, "interval": 0, "max_yield": 6, "ongoing": False},
+    "CARROT": {"seed": 20, "first_yield_day": 2, "max_yield_day": 3, "interval": 0, "max_yield": 4, "ongoing": False},
+    "WHEAT": {"seed": 10, "first_yield_day": 2, "max_yield_day": 4, "interval": 0, "max_yield": 6, "ongoing": False},
 }
 
 
