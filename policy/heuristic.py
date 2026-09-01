@@ -1,6 +1,6 @@
 """Rule-based Kaggriculture agent.
 
-v7: farmer + hired hands each patrol their own band of tiles in a snake
+v8: farmer + hired hands each patrol their own band of tiles in a snake
 pattern; at each tile: harvest if ripe, water if thirsty, dig if spent/weed,
 else plant that worker's assigned crop if seed is held. Sells are throttled
 to 1 unit/turn rather than dumping the whole shed at once (SELL_THROTTLE).
@@ -76,6 +76,10 @@ new evidence:
   crop-mix specifically, in case the optimal values shifted once production
   split across markets -- both confirmed unchanged from the pure-MELON
   tuning.
+- Nearby 3-crop ratios (4:1:2, 4:2:1 MELON:TOMATO:WHEAT) and a 4-crop
+  spread (4 MELON:1 each TOMATO/WHEAT/CARROT) all scored below 5:1:1 --
+  sacrificing a 2nd MELON worker for broader diversification isn't worth
+  it; one worker's worth of diversification is the right amount.
 """
 
 # Split workers across three crops (5 MELON : 1 TOMATO : 1 WHEAT) so
@@ -89,7 +93,9 @@ HANDS_CAP = 6  # hands hired per day -> up to 7 total workers (farmer + hands).
 # pre-harvest dry spell, then a couple of huge lump-sum harvests) make labor
 # count matter far less than for TOMATO. 6 scored best of those tested, and
 # re-confirmed best again after the crop-mix change (see docstring).
-SEED_BUFFER_PER_WORKER = 2
+SEED_BUFFER_PER_WORKER = 1  # re-swept (1/2/3) under the v7 crop-mix: 1 wins
+# -- keeping less seed capital tied up per crop outweighs the restock
+# frequency, now that 3 crops each need their own buffer.
 SELL_THROTTLE = 1  # cap units sold per turn -- large one-shot dumps (a
 # harvest wave of 30-85 MELON at once, confirmed empirically) walk down the
 # quadratic above-I0 price curve hard (avg realized price ~$226 vs $250 base
