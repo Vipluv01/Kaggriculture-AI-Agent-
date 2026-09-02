@@ -80,6 +80,19 @@ new evidence:
   spread (4 MELON:1 each TOMATO/WHEAT/CARROT) all scored below 5:1:1 --
   sacrificing a 2nd MELON worker for broader diversification isn't worth
   it; one worker's worth of diversification is the right amount.
+- Land expansion, a 5th time: bought as soon as barely affordable (no
+  profit-margin or day gate), with hiring scaled to quadrants owned. Total
+  wipeout ($0 every episode, 0/10 win rate) -- root cause is structural, not
+  financial: `_workable_positions`/`_band_for_worker` redistribute ALL
+  workable tiles (now ~50, not 25) across current workers the instant a
+  quadrant unlocks, but hiring only scales up a day later (hands are
+  rehired once, at hour 0). The existing labor can't water the suddenly-
+  doubled tile count fast enough, tiles go to weed, and
+  buy-seed -> plant -> weed -> dig -> replant drains cash with zero
+  harvests ever completing. This is a real bug in the band-partitioning
+  architecture, not just unfavorable economics -- fixing it would mean
+  staging new land into worker bands only once labor has caught up, which
+  is real additional engineering, not another parameter to sweep.
 """
 
 # Split workers across three crops (5 MELON : 1 TOMATO : 1 WHEAT) so
