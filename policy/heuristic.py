@@ -1,6 +1,6 @@
 """Rule-based Kaggriculture agent.
 
-v8: farmer + hired hands each patrol their own band of tiles in a snake
+v9: farmer + hired hands each patrol their own band of tiles in a snake
 pattern; at each tile: harvest if ripe, water if thirsty, dig if spent/weed,
 else plant that worker's assigned crop if seed is held. Sells are throttled
 to 1 unit/turn rather than dumping the whole shed at once (SELL_THROTTLE).
@@ -48,6 +48,16 @@ Hands are re-hired every day (the env wipes farm["hands"], the farmer's
 position, carried inventories, and hire cost at end-of-day) so the agent
 hires HANDS_CAP fresh hands each morning (hour 0) -- cheap, since the first
 few hires of a day cost $1-3 each.
+
+A fifth, smaller lever: hold inventory instead of selling when a crop's
+price has crashed below SELL_PRICE_FLOOR_FRAC (0.4) of its base price,
+unless the shed is close to capacity (in which case sell anyway -- losing
+units to overflow discard is worse than a bad price). Swept 0.2/0.3/0.4/0.6:
+0.4 was best, 0.6 held too aggressively and scored below the no-holding
+baseline. ~$32.9k -> ~$33.1k -- real but modest, and only borderline
+statistically distinguishable from the baseline at n=15 (t~1.4); kept
+because it's directionally consistent across every threshold tested and
+carries no downside (still fully sells through by game end).
 
 Things tried and dropped, documented so they don't get re-litigated without
 new evidence:
@@ -134,6 +144,12 @@ SELL_THROTTLE = 1  # cap units sold per turn -- large one-shot dumps (a
 # game end: confirmed 0 units stranded in the shed at the final step) lets
 # the market's slow daily consumption (-1 unit/day for MELON) recover
 # between each unit instead of quoting many units against the same dump.
+SELL_PRICE_FLOOR_FRAC = 0.4
+# price has crashed below this fraction of base -- unless shed is close to
+# capacity, in which case sell anyway (losing units to overflow discard is
+# worse than a bad price).
+SHED_CAPACITY = 100
+BASE_PRICE = {"TOMATO": 60, "MELON": 250, "CARROT": 35, "WHEAT": 25}
 
 # Mirrors kaggle_environments' CROPS table (kaggriculture.py) for the two
 # crops this agent knows how to farm -- kept local since the submission
@@ -277,9 +293,16 @@ def agent(obs):
             hired += 1
         market.extend([["HIRE"]] * hired)
 
+    market_prices = (obs.get("market", {}) or {}).get("prices", {})
     for item, qty in shed.items():
-        if qty > 0:
-            market.append(["SELL", item, min(qty, SELL_THROTTLE)])
+        if qty <= 0:
+            continue
+        base = BASE_PRICE.get(item)
+        price = market_prices.get(item)
+        near_full = qty >= SHED_CAPACITY - 5
+        if base and price is not None and price < base * SELL_PRICE_FLOOR_FRAC and not near_full:
+            continue  # hold -- price has crashed, wait for it to recover
+        market.append(["SELL", item, min(qty, SELL_THROTTLE)])
 
     worker_crops = [CROP_MIX[i % len(CROP_MIX)] for i in range(num_workers)]
     crops_in_use = set(worker_crops)
