@@ -89,10 +89,27 @@ new evidence:
   rehired once, at hour 0). The existing labor can't water the suddenly-
   doubled tile count fast enough, tiles go to weed, and
   buy-seed -> plant -> weed -> dig -> replant drains cash with zero
-  harvests ever completing. This is a real bug in the band-partitioning
-  architecture, not just unfavorable economics -- fixing it would mean
-  staging new land into worker bands only once labor has caught up, which
-  is real additional engineering, not another parameter to sweep.
+  harvests ever completing.
+- Land expansion, a 6th time, after actually fixing the bug found in
+  attempt 5: NW's band assignment was made permanently fixed-size
+  (NW_WORKERS), with only hands hired beyond that routed to newly unlocked
+  land, so an established worker's tile density can never be diluted by a
+  land purchase again. This genuinely fixed the collapse (no more $0
+  wipeouts) but still scored far below the single-quadrant baseline
+  (~$16k vs ~$32.9k) -- the real constraint turned out to be the *market*,
+  not tiles or labor. Worker-crop assignment cycles the same 5:1:1 ratio
+  regardless of worker count, so 4 quadrants' worth of workers (~25 vs 7)
+  scaled MELON/TOMATO/WHEAT production by ~3.5x each -- but market
+  absorption capacity is roughly fixed (MARKET_I0=10000, each crop's own
+  T~200-400) regardless of how much land you farm. Confirmed directly:
+  MELON's price bottomed at $1 (the hard floor) with 4 quadrants of
+  production vs $51 with 1. Land expansion isn't unprofitable because of
+  weeds or dry spells here -- it's that this farm was already producing at
+  roughly the market's absorption ceiling with a single quadrant, and more
+  land just means more product chasing the same limited buyers. Overcoming
+  this would need diversifying into most/all ~9 sellable products
+  simultaneously as land grows, not just scaling the existing 3-crop mix --
+  a substantially bigger redesign, not a further parameter sweep.
 """
 
 # Split workers across three crops (5 MELON : 1 TOMATO : 1 WHEAT) so
