@@ -1,9 +1,22 @@
 """Rule-based Kaggriculture agent.
 
-v9: farmer + hired hands each patrol their own band of tiles in a snake
+v10: farmer + hired hands each patrol their own band of tiles in a snake
 pattern; at each tile: harvest if ripe, water if thirsty, dig if spent/weed,
 else plant that worker's assigned crop if seed is held. Sells are throttled
 to 1 unit/turn rather than dumping the whole shed at once (SELL_THROTTLE).
+
+THE biggest mechanical lever, found last and worth more than any parameter
+sweep: harvest when yield is MAXIMIZED, not when it first becomes legal.
+One-shot crops accrue +1 yield_units per WATER across the window
+[(max_yield_day+1)//2, max_yield_day] (kaggriculture.py's WATER handler),
+but HARVEST becomes legal at first_yield_day -- which for WHEAT is age 2
+while its bonus window runs to age 4. The old "ripe = mature and
+yield_units > 0" check therefore banked WHEAT at ~1-2 of its 6 possible
+units, every single cycle. Gating ripe on (units >= max_yield or
+age >= max_yield_day) was worth ~$33.1k -> ~$34.1k on its own (t~3.5), and
+it also shifted the optimal crop mix: with WHEAT no longer harvested
+half-grown it earns a second worker, and 4 MELON : 1 TOMATO : 2 WHEAT beat
+the old 5:1:1 by another ~$2k. Combined: ~$33.1k -> ~$36.1k (+8.9%, t~13).
 
 Crop choice was the single biggest lever found: MELON ($250 base price, one
 shot, max_yield=6) beats TOMATO ($60 base price, ongoing, max_yield=4) by
@@ -122,11 +135,14 @@ new evidence:
   a substantially bigger redesign, not a further parameter sweep.
 """
 
-# Split workers across three crops (5 MELON : 1 TOMATO : 1 WHEAT) so
+# Split workers across three crops (4 MELON : 1 TOMATO : 2 WHEAT) so
 # production doesn't all land in one market and crash its own price -- see
 # docstring. Swept empirically, not derived: ratios and crop choice both
 # matter and aren't monotonic or predictable from each crop's solo value.
-CROP_MIX = ["MELON"] * 5 + ["TOMATO"] * 1 + ["WHEAT"] * 1
+# Re-swept after the harvest-timing fix (5:1:1, 4:1:2, 5:0:2, 6:0:1, 3:1:3,
+# 4:2:1): the optimum moved from 5:1:1 to 4:1:2, because WHEAT is no longer
+# harvested half-grown and so earns a second worker. 3:1:3 overshoots.
+CROP_MIX = ["MELON"] * 4 + ["TOMATO"] * 1 + ["WHEAT"] * 2
 HANDS_CAP = 6  # hands hired per day -> up to 7 total workers (farmer + hands).
 # Swept 2/4/6/8 for MELON: results were close (~26.3-27.1k) and not
 # monotonic -- MELON's economics (labor mostly idles during the 10-12 day
@@ -209,8 +225,22 @@ def _next_target_in_band(tiles, band, px, py, day, crop_info):
             return x, y, "weed"
         if isinstance(t, dict) and t.get("kind") == "PLANT":
             age = day - t.get("planted_day", day)
-            mature = crop_info["ongoing"] or age >= crop_info["first_yield_day"]
-            if mature and t.get("yield_units", 0) > 0:
+            units = t.get("yield_units", 0)
+            if crop_info["ongoing"]:
+                ripe = units > 0
+            else:
+                # One-shot crops keep accruing +1 yield per WATER until
+                # max_yield_day (see kaggriculture.py's WATER handler), so
+                # harvesting the moment it's legal (first_yield_day) banks a
+                # partly-grown crop -- WHEAT at age 2 has ~1-2 of its 6 units.
+                # Wait for the yield cap or the last bonus day, whichever
+                # comes first.
+                ripe = (
+                    age >= crop_info["first_yield_day"]
+                    and units > 0
+                    and (units >= crop_info["max_yield"] or age >= crop_info["max_yield_day"])
+                )
+            if ripe:
                 return x, y, "ripe"
             if not t.get("watered_today", False):
                 return x, y, "thirsty"
