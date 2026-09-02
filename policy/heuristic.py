@@ -1,6 +1,6 @@
 """Rule-based Kaggriculture agent.
 
-v10: farmer + hired hands each patrol their own band of tiles in a snake
+v11: farmer + hired hands each patrol their own band of tiles in a snake
 pattern; at each tile: harvest if ripe, water if thirsty, dig if spent/weed,
 else plant that worker's assigned crop if seed is held. Sells are throttled
 to 1 unit/turn rather than dumping the whole shed at once (SELL_THROTTLE).
@@ -17,6 +17,15 @@ age >= max_yield_day) was worth ~$33.1k -> ~$34.1k on its own (t~3.5), and
 it also shifted the optimal crop mix: with WHEAT no longer harvested
 half-grown it earns a second worker, and 4 MELON : 1 TOMATO : 2 WHEAT beat
 the old 5:1:1 by another ~$2k. Combined: ~$33.1k -> ~$36.1k (+8.9%, t~13).
+
+The same "read what the env actually rewards" idea again, on watering: a
+plant only turns to weed at consecutive_unwatered >= 2, and watering only
+ADDS yield inside a one-shot crop's bonus window. So watering a plant that
+was watered yesterday, outside its window, buys nothing -- it just burns a
+worker-turn. Skipping those waterings (water only when in the yield window,
+or when consecutive_unwatered >= 1 and the plant would otherwise weed) was
+worth ~$36.1k -> ~$36.7k (n=15, t~2.3). Re-swept the crop mix again after
+it; 4:1:2 still wins (3:1:3 scores ~$32-33k).
 
 Crop choice was the single biggest lever found: MELON ($250 base price, one
 shot, max_yield=6) beats TOMATO ($60 base price, ongoing, max_yield=4) by
@@ -243,7 +252,18 @@ def _next_target_in_band(tiles, band, px, py, day, crop_info):
             if ripe:
                 return x, y, "ripe"
             if not t.get("watered_today", False):
-                return x, y, "thirsty"
+                # Watering is only worth a turn if it either buys yield or
+                # prevents a weed. It adds yield only inside a one-shot
+                # crop's bonus window; and a plant only turns to weed at
+                # consecutive_unwatered >= 2, so one watered in the last
+                # day (== 0) can safely skip today.
+                in_yield_window = (
+                    not crop_info["ongoing"]
+                    and (crop_info["max_yield_day"] + 1) // 2 <= age <= crop_info["max_yield_day"]
+                )
+                must_water = t.get("consecutive_unwatered", 1) >= 1
+                if in_yield_window or must_water:
+                    return x, y, "thirsty"
             if crop_info["ongoing"] and age >= exhaust_age:
                 # Fully spent -- all production ticks already used up, it'll
                 # just decay into a weed if left alone. Clear it to replant.
