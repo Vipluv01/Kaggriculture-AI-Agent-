@@ -210,13 +210,22 @@ was close) before being kept.
 - **STRAWBERRY instead of MELON** — weaker alone (~$20.5-22.2k).
 - **Fewer hands during MELON's pre-harvest dry spell** — those early hands are doing
   essential planting/watering setup for tiles that mature later, not sitting idle.
-- **NW/NE worker-pool reallocation** (`NW_WORKERS`/`QUADRANT_WORKERS`, holding total hands at
-  9) — swept the split from NW=8/NE=1 through NW=4/NE=5; NW=7/NE=2 (the current default) and
-  NW=6/NE=3 are statistically tied (n=15: $50,528 vs $50,408, well inside a ~$700-780
-  standard error), every other split tested clearly worse. Confirms total achievable
-  workforce (~9, gated by the market-order cap, see lever 10) is the real constraint — how
-  it's divided between quadrants barely matters once each side has enough hands to work its
-  own band.
+- **NW/NE worker-pool reallocation** (`NW_WORKERS`, holding total hands at 9 — corrected
+  finding, see the bug-fix commit) — the first pass at this sweep (NW=8/NE=1 through
+  NW=4/NE=5) turned out to be contaminated: `_worker_quadrant_and_crop`'s old block-chunked
+  assignment silently dropped any worker past the 3rd in NE to `(None, None, None)` rather
+  than actually giving NE a 4th/5th worker, so "NW=6/NE=3" and smaller-NW configs were
+  secretly still running NE at 3 workers plus one fully wasted (still paid for) hire — which
+  is why that pass read as a flat tie instead of the real effect. After fixing the assignment
+  logic (round-robin instead of fixed-block, see the commit), NE genuinely gets 4 workers at
+  NW=6, and the corrected result is different: NW=6/NE=4 is clearly *worse* (n=15: mean
+  $48,059, stdev $4,296 — both lower and far more volatile than baseline), while NW=8/NE=2
+  needed two independent n=15 batches to resolve as a tie with baseline ($51,962 then
+  $50,473, averaging to within noise of baseline's $51,481). Net conclusion is the same as
+  before (NW=7/NE=3 stays optimal) but the *reason* isn't "division barely matters" — it's
+  that NW's marginal worker (MELON's high per-unit price, big lumpy harvests) is worth more
+  than NE's, so shrinking NW hurts, and there's no confirmed gain from growing NW further
+  either.
 - **CASH_RESERVE** (50/100/400/800 vs default 200) and **LAND_MIN_DAY** (1/2/5/7 vs default
   3) — both flat across the whole range tested, no signal above the ~$1-2k run-to-run noise.
 - **NW's own crop mix, re-swept post-land-expansion** (3:2:2, 4:2:1, 5:1:1, 3:1:3, 4:0:3 vs
@@ -254,10 +263,15 @@ alarm (LIQUIDATION_DAYS, above) in the first place.
 Ten other independent parameters/structural choices (worker-pool split, CASH_RESERVE,
 LAND_MIN_DAY, NW's crop mix, liquidation timing, hire/sell order priority, and worker
 idle-time) came back flat, noise, or negative across two full rounds of testing before the
-movement-targeting audit (lever 11) broke that streak. The one remaining idea with real (if
-likely small) potential is a restructured, non-additive multi-quadrant worker split — so a
-second land quadrant (SW/SE) doesn't just dilute the existing ~9-hand budget the way it did
-in the v13/v14 attempts — which would need actual logic changes, not parameter sweeps, to
-test properly.
+movement-targeting audit (lever 11) broke that streak. One of those ten — worker-pool
+split — later turned out to have been tested on buggy code (a real assignment-overflow bug,
+now fixed, that silently wasted any worker past the 3rd assigned to NE); re-run correctly, it
+still doesn't beat the current default, but for a different, now-understood reason (see the
+corrected entry above) rather than "division doesn't matter." The one remaining idea with
+real (if likely small) potential is a restructured, non-additive multi-quadrant worker split
+— so a second land quadrant (SW/SE) doesn't just dilute the existing ~9-hand budget the way
+it did in the v13/v14 attempts — which would need further logic changes, not parameter
+sweeps, to test properly.
+
 Otherwise: the recorded-episode datasets on Kaggle/HF, for imitation learning as a possible
 next direction beyond the rule-based approach.
