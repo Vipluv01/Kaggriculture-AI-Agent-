@@ -166,6 +166,17 @@ full detail, so they don't get re-litigated without new evidence):
   own band.
 - **CASH_RESERVE** (50/100/400/800 vs default 200) and **LAND_MIN_DAY** (1/2/5/7 vs default
   3) — both flat across the whole range tested, no signal above the ~$1-2k run-to-run noise.
+- **NW's own crop mix, re-swept post-land-expansion** (3:2:2, 4:2:1, 5:1:1, 3:1:3, 4:0:3 vs
+  default 4:1:2 MELON:TOMATO:WHEAT) — 5:1:1 looked promising on a quick 3-opponent pass
+  (~$51.3k) but flattened to a dead heat at n=15 ($50,492 vs $50,528 baseline, stdev ~$3.5k);
+  a caution about trusting the quick check alone. 3:2:2/3:1:3 (less MELON) were clearly
+  worse; the original 4:1:2 remains the best confirmed mix even after land expansion changed
+  everything else.
+- **LIQUIDATION_DAYS** (1/5/7 vs default 3) and **LIQUIDATION_THROTTLE** (3/10 vs default 6)
+  — LIQUIDATION_DAYS=1 looked like a real win on a first n=15 batch (mean $52,433, t≈1.9 vs
+  baseline) but a second independent n=15 batch reverted to baseline ($50,818) — a clean
+  example of why single-batch significance isn't enough at this variance level; two batches
+  are now the minimum bar before trusting an n=15 result on this agent.
 
 8. **Stop buying land nobody can staff (v14).** Following directly from the Fibonacci
    discovery above: NW's 7 workers + `QUADRANT_WORKERS`=3 for NE already consumes the
