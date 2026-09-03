@@ -110,11 +110,27 @@ new evidence:
   change the math) -- worse again, and by more: MELON's own 10-12 day
   pre-harvest dry spell compounds with a second quadrant's own ramp-up,
   leaving too little season left to pay back the capex.
-- Fertilizer: implemented correctly (including fixing a bug where the
-  generic "sell everything" loop was reselling it before pickup) -- but its
-  bonus is capped by the same `min(max_yield, ...)` as ordinary production:
-  reaches the cap faster, never raises it. Net-negative once travel/
-  purchase overhead is counted.
+- Fertilizer, twice. First pass (all crops): bonus is capped by the same
+  `min(max_yield, ...)` as ordinary production -- reaches the cap faster,
+  never raises it, for MELON and TOMATO specifically (checked the actual
+  arithmetic: MELON's 7-day window already exceeds its cap via plain
+  watering alone, 1+7*1=8 capped at 6; TOMATO's 4 ticks x 1 already equal
+  its cap of 4). But WHEAT's window is only 3 days -- 1+3*1=4, under its
+  cap of 6 -- so fertilizer's +2/water genuinely raises realized yield
+  there (1+3*2=7, capped at 6: a real +50%/cycle, not just faster-to-the-
+  same-place). Built it properly for WHEAT only: BUY_PRODUCT, a worker
+  picks it up (fixed two more real bugs along the way -- PICKUP only
+  recognized one of the four valid shed tiles, and hands don't exist in
+  the observation until hour 1 since they're hired *during* hour 0's
+  action, so a hour==0 pickup gate silently never fired for any hand,
+  which is every WHEAT worker in this mix). Once actually working
+  end-to-end (confirmed via action counts: 54 pickups, 65 applications),
+  it still scored net-negative (~$30-30.5k vs ~$36.6k) -- the logistics
+  (pickup trips, and the *daily* pickup delaying every WHEAT worker's
+  first move of the day) cost more than the yield gain is worth, even
+  where the yield math is genuinely favorable. Fertilizer is now closed
+  off for every crop in this mix, for two different, both-confirmed
+  reasons depending on the crop.
 - WHEAT instead of MELON: much faster cycle (first_yield_day=2 vs 10) but
   25x lower base price ($25 vs $250) isn't compensated by the extra cycles.
 - STRAWBERRY instead of MELON: scored ~$20.5-22.2k, well below MELON, and
