@@ -513,19 +513,24 @@ def _worker_action(tiles, band, pos, seeds_available, day, crop, crop_info, fall
 def _worker_quadrant_and_crop(i, extra_unlocked):
     """Worker index -> (quadrant, crop, local_idx_within_that_quadrant).
     NW's first NW_WORKERS slots use CROP_MIX exactly as in the
-    single-quadrant version; every quadrant beyond that gets its own fixed
-    QUADRANT_WORKERS-sized pool from QUADRANT_CROP_MIX, filled in unlock
-    order. Returns (None, None, None) if there's no assigned quadrant yet
-    (more workers hired than currently-unlocked land can support --
-    band-staging handles that gracefully, see NW_WORKERS docstring)."""
+    single-quadrant version; every worker beyond that round-robins across
+    extra_unlocked (currently always at most one quadrant, NE), so
+    local_idx grows without bound instead of wrapping at a fixed
+    QUADRANT_WORKERS-sized block. That block-chunked version (q_idx =
+    j // QUADRANT_WORKERS) silently dropped any worker past the Nth in a
+    single extra quadrant to (None, None, None) -- a real bug found while
+    testing NW_WORKERS/QUADRANT_WORKERS splits other than the shipped one:
+    a wasted, still-paid-for hire that invalidated that test's result.
+    Returns (None, None, None) only if no land is unlocked yet."""
     if i < NW_WORKERS:
         return "NW", CROP_MIX[i % len(CROP_MIX)], i
     j = i - NW_WORKERS
-    q_idx = j // QUADRANT_WORKERS
-    if q_idx >= len(extra_unlocked):
+    n_extra_q = len(extra_unlocked)
+    if n_extra_q == 0:
         return None, None, None
+    q_idx = j % n_extra_q
+    local_idx = j // n_extra_q
     quadrant = extra_unlocked[q_idx]
-    local_idx = j % QUADRANT_WORKERS
     mix = QUADRANT_CROP_MIX[quadrant]
     return quadrant, mix[local_idx % len(mix)], local_idx
 
@@ -641,6 +646,17 @@ def agent(obs):
 
     wheat_seeds_available = seeds.get("WHEAT", 0) > 0
     quadrant_positions = {}  # cache: quadrant -> its workable tile list
+    # Band pool_size must match how many workers are ACTUALLY assigned to
+    # that quadrant this turn, not a fixed constant -- QUADRANT_WORKERS is
+    # only a hiring TARGET (see hands_cap above); the real count can differ
+    # (fewer early on, or a different split if NW_WORKERS/QUADRANT_WORKERS
+    # get retuned). Using a stale fixed pool_size either strands land
+    # (bands sized bigger than the workers who'll ever fill them) or -- the
+    # bug this replaced -- assigns bands that overlap between workers.
+    quadrant_worker_counts = {}
+    for q, _, _ in worker_info:
+        if q is not None:
+            quadrant_worker_counts[q] = quadrant_worker_counts.get(q, 0) + 1
 
     def dispatch(i, pos):
         quadrant, crop, local_idx = worker_info[i]
@@ -648,7 +664,7 @@ def agent(obs):
             return ["PASS"]  # more workers hired than land currently supports
         if quadrant not in quadrant_positions:
             quadrant_positions[quadrant] = _positions_in_quadrant(tiles, quadrant)
-        pool_size = NW_WORKERS if quadrant == "NW" else QUADRANT_WORKERS
+        pool_size = NW_WORKERS if quadrant == "NW" else quadrant_worker_counts[quadrant]
         band = _band_for_worker(quadrant_positions[quadrant], local_idx, pool_size)
         seeds_available = seeds.get(crop, 0) > 0
         return _worker_action(
