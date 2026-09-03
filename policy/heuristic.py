@@ -147,12 +147,20 @@ new evidence:
   ~$36.3k). Tried having the rancher farm WHEAT on its band's other tiles
   during ranch downtime to recover the idle-tile cost -- barely changed
   anything, meaning there's little true idle time once shed trips, feed,
-  and care are accounted for. A near miss, not a clean rejection: the
-  underlying mechanic is real and substantial, but one MELON worker's
-  output (boosted by every lever above) currently sets a high bar. Left
-  closed rather than escalated to 2+ animals per rancher, which might
-  close the gap by amortizing the daily shed-trip overhead across more
-  animals -- untested, a real next step if revisited.
+  and care are accounted for.
+
+  Tested the flagged follow-up too: 2 SHEEP per rancher, to see if a
+  second animal amortizes the fixed daily cost (shed trip, two stationary
+  actions) across more WOOL revenue. Built and confirmed working (2x
+  BUILD_PASTURE/PLACE, ~52 FEED/51 CARE, both animals reaching full
+  steady-state care) -- but it came out *worse* than the single-animal
+  version, not better (~$34.2k mean, n=15), and with far higher variance
+  (stdev $3.7k vs $375 for v12) -- a real reliability regression, not just
+  a wash. The fixed-cost-amortization hypothesis doesn't hold: scaling up
+  concentrates more of the farm's cash and labor into a single higher-
+  variance venture rather than smoothing anything out. Both animal counts
+  now closed on real evidence -- 1 is a near miss, 2 is worse and
+  riskier -- rather than left as an assumed-favorable unknown.
 - WHEAT instead of MELON: much faster cycle (first_yield_day=2 vs 10) but
   25x lower base price ($25 vs $250) isn't compensated by the extra cycles.
 - STRAWBERRY instead of MELON: scored ~$20.5-22.2k, well below MELON, and
