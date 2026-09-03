@@ -1,9 +1,29 @@
 """Rule-based Kaggriculture agent.
 
-v15: farmer + hired hands each patrol their own band of tiles in a snake
-pattern; at each tile: harvest if ripe, water if thirsty, dig if spent/weed,
-else plant that worker's assigned crop if seed is held. Sells are throttled
-to 1 unit/turn rather than dumping the whole shed at once (SELL_THROTTLE).
+v16: farmer + hired hands each patrol their own band of tiles, always
+stepping toward whichever actionable tile in the band is nearest (not a
+fixed traversal order); at each tile: harvest if ripe, water if thirsty,
+dig if spent/weed, else plant that worker's assigned crop if seed is held.
+Sells are throttled to 1 unit/turn rather than dumping the whole shed at
+once (SELL_THROTTLE).
+
+Eleventh lever: nearest-actionable-tile targeting instead of fixed
+snake-order targeting (v16). Found by auditing the actual action
+distribution over a full game rather than more parameter sweeps: PASS was
+46% of all worker-actions (mostly legitimate -- crops still growing, or the
+season's final days correctly refusing to plant anything that can't mature,
+see _can_still_mature) but movement (WEST/NORTH/EAST/SOUTH combined) was
+35%, more than the 18.5% spent on WATER/HARVEST/PLANT/DIG combined. The old
+_next_target_in_band walked the band in a fixed rotated-snake order and
+target-ed the FIRST actionable tile it hit in that order -- not necessarily
+the closest one to the worker's current position. Switching to nearest
+actionable tile by Manhattan distance was worth ~$50.5k -> ~$51.5k (two
+independent n=15 batches per side: nearest-tile 51,558/51,405 vs baseline
+50,528/50,420 -- note the tight batch-to-batch agreement within each
+config, unlike some other changes this session that looked real on one
+n=15 batch and vanished on a second (see README); t~1.5 combined,
+consistent in direction across every check run, including the standard
+3-opponent evaluate.py pass).
 
 THE biggest mechanical lever, found last and worth more than any parameter
 sweep: harvest when yield is MAXIMIZED, not when it first becomes legal.
@@ -397,16 +417,16 @@ def _can_still_mature(crop_info, day):
 def _next_target_in_band(tiles, band, px, py, day, crop_info):
     if not band:
         return px, py, "none"
-    start = band.index((px, py)) if (px, py) in band else 0
-    ordered = band[start:] + band[:start]
     exhaust_age = _crop_exhaust_age(crop_info)
-    for x, y in ordered:
+    best = None  # (distance, x, y, state) -- nearest actionable tile wins
+    for x, y in band:
         t = tiles[y][x]
+        state = None
         if t is None:
-            return x, y, "empty"
-        if isinstance(t, dict) and t.get("kind") == "WEED":
-            return x, y, "weed"
-        if isinstance(t, dict) and t.get("kind") == "PLANT":
+            state = "empty"
+        elif isinstance(t, dict) and t.get("kind") == "WEED":
+            state = "weed"
+        elif isinstance(t, dict) and t.get("kind") == "PLANT":
             age = day - t.get("planted_day", day)
             units = t.get("yield_units", 0)
             if crop_info["ongoing"]:
@@ -424,8 +444,8 @@ def _next_target_in_band(tiles, band, px, py, day, crop_info):
                     and (units >= crop_info["max_yield"] or age >= crop_info["max_yield_day"])
                 )
             if ripe:
-                return x, y, "ripe"
-            if not t.get("watered_today", False):
+                state = "ripe"
+            elif not t.get("watered_today", False):
                 # Watering is only worth a turn if it either buys yield or
                 # prevents a weed. It adds yield only inside a one-shot
                 # crop's bonus window; and a plant only turns to weed at
@@ -437,11 +457,18 @@ def _next_target_in_band(tiles, band, px, py, day, crop_info):
                 )
                 must_water = t.get("consecutive_unwatered", 1) >= 1
                 if in_yield_window or must_water:
-                    return x, y, "thirsty"
-            if crop_info["ongoing"] and age >= exhaust_age:
+                    state = "thirsty"
+            if state is None and crop_info["ongoing"] and age >= exhaust_age:
                 # Fully spent -- all production ticks already used up, it'll
                 # just decay into a weed if left alone. Clear it to replant.
-                return x, y, "spent"
+                state = "spent"
+        if state is None:
+            continue
+        dist = abs(x - px) + abs(y - py)
+        if best is None or dist < best[0]:
+            best = (dist, x, y, state)
+    if best is not None:
+        return best[1], best[2], best[3]
     return band[0][0], band[0][1], "none"
 
 

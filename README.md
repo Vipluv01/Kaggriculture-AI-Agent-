@@ -37,7 +37,7 @@ tar -czf submission.tar.gz main.py policy/
 
 ## Status
 
-v15 heuristic (`policy/heuristic.py`) — current best, submitted. Progression:
+v16 heuristic (`policy/heuristic.py`) — current best, submitted. Progression:
 
 | version | change | mean $ (10+ episodes/opponent) |
 |---|---|---|
@@ -55,14 +55,15 @@ v15 heuristic (`policy/heuristic.py`) — current best, submitted. Progression:
 | v12 | +refuse to plant crops that can't mature + season-end liquidation | ~36.3-36.6k |
 | v13 | **land expansion, working**: each extra quadrant grows a different crop | ~41.9k |
 | v14 | stop buying land nobody can staff: only NE, not all 3 extra quadrants | ~47.0k |
-| v15 | **drop NE's WHEAT diversifier**: not needed at NE's small (~3-worker) scale | **~51.3k** |
+| v15 | **drop NE's WHEAT diversifier**: not needed at NE's small (~3-worker) scale | ~51.3k |
+| v16 | nearest-actionable-tile targeting instead of fixed snake-order traversal | **~51.5k** |
 
 Real ladder scores (all `COMPLETE`; scores are a live skill rating against a growing ~7000-team
 opponent pool, not raw dollars, and drift over time for everyone as that pool strengthens —
 same-window comparisons are what's meaningful, not the absolute number): v1=267.1, v2=263.3,
 v3=201.2, v4 climbed 372.7→441.4→439.7→426.6 across re-submits while it was being tuned,
 v5=361.6, v6=445.9, v7=398.9, v8=426.6, v9=440.2, v10=473.1, v11=406.7, v12=416.5, v13=489.2,
-v14=466.8, **v15=499.4 (current best)**.
+v14=466.8, v15=499.4, **v16=pending submission**.
 
 ### Levers found
 
@@ -174,6 +175,19 @@ was close) before being kept.
     opponents, confirmed twice): losing 1-2 HIRE entries to truncation costs that whole
     day's labor for every worker on the payroll, far more expensive than a sale sitting in
     the shed one extra hour. Reverted; the code comment now records the corrected reasoning.
+11. **Nearest-actionable-tile targeting instead of fixed snake order (v16).** Constant sweeps
+    had run dry (see the rejected list below), so instead of tuning another number, audited
+    the actual per-action distribution over a full game: PASS was 46% of all worker-actions
+    (mostly legitimate, see the idle-time entry below) but movement (WEST/NORTH/EAST/SOUTH
+    combined) was 35% — more than the 18.5% spent on WATER/HARVEST/PLANT/DIG combined. The
+    old `_next_target_in_band` walked the band in a fixed rotated-snake order and targeted
+    the *first* actionable tile hit in that order, not necessarily the closest one to the
+    worker's current position. Switched to picking the nearest actionable tile by Manhattan
+    distance instead. ~$50.5k → ~$51.5k — validated with two independent n=15 batches on
+    each side of the change (nearest-tile: $51,558 then $51,405; baseline: $50,528 then
+    $50,420), the tight batch-to-batch agreement within each config being the main reason
+    for confidence here (contrast the LIQUIDATION_DAYS entry below, where a $1,615
+    batch-to-batch swing on one config was the tell that it was noise, not a real effect).
 
 ### Dropped or rejected (kept so they aren't re-litigated without new evidence)
 
@@ -220,25 +234,30 @@ was close) before being kept.
   worker-actions). 91% trace to workers whose whole band is genuinely still growing (nothing
   actionable exists yet); the remaining 9% all cluster in the season's final 4 days, where
   `_can_still_mature` is correctly refusing to plant anything that can't finish before day
-  30 (the intended behavior from lever fix v12). No exploitable idle time found.
+  30 (the intended behavior from lever fix v12). No exploitable idle time found here — but
+  the same audit's *movement*-share number is what led to lever 11 above.
 
 Current results (`scripts/evaluate.py`, 10 episodes each, alternating sides), full 720-turn season:
 
 | opponent | our mean $ | their mean $ | win rate |
 |---|---|---|---|
-| pass   | 51800 | 3000 | 10/10 |
-| random | 51706 |    1 | 10/10 |
-| starter| 50948 | 3618 | 10/10 |
+| pass   | 51118 | 3000 | 10/10 |
+| random | 50900 |   96 | 10/10 |
+| starter| 51382 | 3543 | 10/10 |
 
-Confirmed with a 15-episode robustness check: mean $51,348, stdev $1,945 (~3.8%) — nowhere
-near enough variance to explain the v14→v15 +9.2% jump by chance (t≈6.8).
+v15 was confirmed with a 15-episode robustness check: mean $51,348, stdev $1,945 (~3.8%) —
+nowhere near enough variance to explain the v14→v15 +9.2% jump by chance (t≈6.8). v16's
+nearest-tile lever is backed by two independent n=15 batches per side instead (see lever 11)
+rather than one larger batch, since that's what surfaced this session's single-batch false
+alarm (LIQUIDATION_DAYS, above) in the first place.
 
-v15 is holding as a genuine local optimum: ten independent parameters/structural choices
-(worker-pool split, CASH_RESERVE, LAND_MIN_DAY, NW's crop mix, liquidation timing, hire/sell
-order priority, and worker idle-time) have all come back flat, noise, or negative against it
-across two full rounds of testing. The one remaining idea with real (if likely small)
-potential is a restructured, non-additive multi-quadrant worker split — so a second land
-quadrant (SW/SE) doesn't just dilute the existing ~9-hand budget the way it did in the v13/v14
-attempts — which would need actual logic changes, not parameter sweeps, to test properly.
+Ten other independent parameters/structural choices (worker-pool split, CASH_RESERVE,
+LAND_MIN_DAY, NW's crop mix, liquidation timing, hire/sell order priority, and worker
+idle-time) came back flat, noise, or negative across two full rounds of testing before the
+movement-targeting audit (lever 11) broke that streak. The one remaining idea with real (if
+likely small) potential is a restructured, non-additive multi-quadrant worker split — so a
+second land quadrant (SW/SE) doesn't just dilute the existing ~9-hand budget the way it did
+in the v13/v14 attempts — which would need actual logic changes, not parameter sweeps, to
+test properly.
 Otherwise: the recorded-episode datasets on Kaggle/HF, for imitation learning as a possible
 next direction beyond the rule-based approach.
