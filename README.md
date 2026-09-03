@@ -37,24 +37,29 @@ tar -czf submission.tar.gz main.py policy/
 
 ## Status
 
-v8 heuristic (`policy/heuristic.py`) — current best, submitted. Progression:
+v13 heuristic (`policy/heuristic.py`) — current best, ready to submit. Progression:
 
 | version | change | mean $ (10+ episodes/opponent) |
 |---|---|---|
 | v1 | single farmer, single quadrant, TOMATO | ~4.6-4.8k |
 | v2 | +4 hired hands/day, band-patrol | ~5.8-6.2k |
 | v3 | +dig & replant spent tiles | ~7.7-9.8k |
-| v4 | **crop swap: MELON instead of TOMATO** + HANDS_CAP retuned to 6 | ~27.1k |
+| v4 | crop swap: MELON instead of TOMATO + HANDS_CAP retuned to 6 | ~27.1k |
 | v5 | +throttle SELL to 1 unit/turn instead of dumping the shed | ~27.6k |
 | v6 | +CROP_MIX: split workers 5 MELON : 2 TOMATO | ~31.3k |
-| v7 | **+3-way CROP_MIX: 5 MELON : 1 TOMATO : 1 WHEAT** | ~32.5k |
-| v8 | +SEED_BUFFER_PER_WORKER retuned 2→1 for the 3-crop mix | **~32.9k** |
+| v7 | +3-way CROP_MIX: 5 MELON : 1 TOMATO : 1 WHEAT | ~32.5k |
+| v8 | +SEED_BUFFER_PER_WORKER retuned 2→1 for the 3-crop mix | ~32.9k |
+| v9 | +hold inventory below 40% of base price instead of always selling | ~33.1k |
+| v10 | **harvest at max yield, not first legal moment** + retuned mix 4:1:2 | ~36.1k |
+| v11 | +skip watering that buys nothing outside the bonus window | ~36.7k |
+| v12 | +refuse to plant crops that can't mature + season-end liquidation | ~36.3-36.6k |
+| v13 | **land expansion, working**: each extra quadrant grows a different crop | **~41.9k** |
 
 Real ladder scores (all `COMPLETE` as submitted; scores are a live skill rating against a
-growing ~7000-team opponent pool, not raw dollars, and drift down over time for everyone
-as that pool strengthens — same-window comparisons are what's meaningful): v1=267.1,
-v2=263.3, v3=201.2, v4 climbed 372.7→441.4→439.7 then settled, v5=361.6, v6/v7 pending at
-last check.
+growing ~7000-team opponent pool, not raw dollars, and drift over time for everyone as
+that pool strengthens — same-window comparisons are what's meaningful): v1=267.1,
+v2=263.3, v3=201.2, v4 climbed 372.7→441.4→439.7→426.6, v5=361.6, v6=445.9, v7=398.9,
+v8-v13 not yet submitted this round.
 
 Four real levers found, each verified independently before being applied together:
 
@@ -94,51 +99,78 @@ This last idea came from the competition's own official tutorial notebook
 (`bovard/kaggriculture-getting-started`, pulled via `kaggle kernels pull`), which builds a
 naive single-crop "Melon Maxxer" and calls out its exact weaknesses: no hired hands/land,
 single-crop-only, no fertilizer, and dumping the whole shed in one sell. All four are now
-addressed here (hands: implemented; land and fertilizer: implemented then evidence-based
-rejected, not skipped; single-crop and dump-selling: fixed by levers 2 and 3 above).
+addressed here.
 
-Things tried and explicitly rejected (see the module docstring for full detail, so they
-don't get re-litigated without new evidence):
-- **Land expansion**, three times — v1 with no extra labor (lost money net), a fixed
-  version with quadrant-scaled hiring under TOMATO (still worse than one quadrant), and
-  retested under MELON specifically since its much higher per-unit price seemed like it
-  might change the math — worse again, and by more: MELON's own 10-12 day pre-harvest dry
-  spell compounds with a second quadrant's own ramp-up, leaving too little season left to
-  pay back the capex.
-- **Fertilizer** — implemented correctly (including fixing a bug where the generic
-  "sell everything" loop was reselling it before a worker could pick it up), but its
-  yield bonus is capped by the same `min(max_yield, ...)` as ordinary production — reaches
-  the cap faster, never raises it. Net-negative once travel/purchase overhead is counted.
-- **WHEAT instead of MELON as the *sole* crop** — much faster cycle (`first_yield_day`=2
-  vs 10) but 25x lower base price isn't compensated by the extra cycles. (Notably, WHEAT
-  as a *diversification partner* alongside MELON is the opposite result — see lever 4. A
+5. **Harvest at max yield, not first legal moment (v10, biggest lever since crop choice).**
+   One-shot crops accrue `+1 yield_units` per `WATER` across a bonus window
+   `[(max_yield_day+1)//2, max_yield_day]`, but `HARVEST` becomes legal at `first_yield_day`
+   — for WHEAT that's age 2 while the bonus window runs to age 4. The old "ripe" check
+   banked WHEAT at ~1-2 of its 6 possible units every cycle. Gating ripe on
+   `yield_units >= max_yield OR age >= max_yield_day` was worth ~$33.1k → ~$34.1k alone, and
+   shifted the optimal mix from 5:1:1 to 4:1:2 MELON:TOMATO:WHEAT (WHEAT now earns a second
+   worker since it's no longer harvested half-grown). Combined: ~$33.1k → ~$36.1k (+8.9%).
+6. **Skip watering that buys nothing (v11).** A plant only weeds at `consecutive_unwatered
+   >= 2`, and watering only adds yield inside the bonus window — so watering a plant that
+   was already watered yesterday, outside that window, burns a worker-turn for nothing.
+   ~$36.1k → ~$36.7k.
+7. **Land expansion, working (v13, the biggest lever yet — see below for the 6 failures
+   first).**
+
+Things tried and explicitly rejected, or fixed after failing (see the module docstring for
+full detail, so they don't get re-litigated without new evidence):
+- **Land expansion, 6 real failures before it worked**: v1 with no extra labor (weeds, lost
+  money net); a fixed version with scaled hiring, still worse under both TOMATO and MELON;
+  attempt 5, a real band-partitioning bug that caused a total $0 wipeout (unlocking a
+  quadrant instantly diluted an established worker's tile density before hiring could catch
+  up); attempt 6, after fixing that bug — still far worse, because market absorption is
+  roughly fixed per product (`MARKET_I0`, each crop's own `T`) regardless of land owned, so
+  scaling the same 3-crop mix across 4 quadrants crashed MELON to the **$1 price floor**.
+  What worked: the market curve's own comment documents `T` as "production capacity of ONE
+  5x5 field" — a new quadrant is meant to grow a *different* product, not more of an
+  already-saturated one. Each extra quadrant now gets its own primary crop (NE: STRAWBERRY,
+  SW: CARROT, SE: TOMATO — all avoiding MELON) plus a WHEAT diversifier. Getting there also
+  meant discovering hands are wiped and hire cost resets to Fibonacci's start *every day*
+  (not once) — hiring 21 hands/day is $28,656 cumulative, not a typo. `market[:10]`'s
+  per-turn order cap had been silently discarding most hires and accidentally protecting
+  the economy; "fixing" that to actually reach a 28-worker target was a real financial
+  collapse (~$1.4-2.2k). Settled on a 3-worker pool per extra quadrant (not 7) — small
+  enough that the same order-cap truncation (now understood, not accidental) keeps the
+  daily hire bill cheap. Combined: ~$36.3k → ~$41.9k (n=15, +15.5%, t≈12).
+- **Fertilizer, twice** — re-derived the yield math per crop instead of trusting a generic
+  rejection: MELON and TOMATO already hit their yield cap via plain watering alone, but
+  WHEAT's window is short enough (3 days) that it doesn't (`1+3*1=4` vs a cap of 6) — a
+  genuine +50%/cycle opportunity. Built it properly for WHEAT (fixed two more real bugs:
+  `PICKUP` only recognized one of four valid shed tiles, and hands don't exist in the
+  observation until hour 1). Confirmed working end-to-end, still net-negative — the daily
+  pickup trip costs more than the yield gain even where the math favors it.
+- **Animal ranching (SHEEP)** — traced the CARE-bonus mechanic precisely and confirmed a
+  real steady-state 3x production multiplier with full daily care. Built a dedicated
+  rancher worker end-to-end (pasture, animal, daily feed/care, harvest/sell) — confirmed
+  working, landed as a near miss (~$34.7k vs baseline). Escalating to 2 animals per rancher
+  (to amortize the daily shed-trip cost) made it *worse*, not better, with far higher
+  variance — the amortization hypothesis didn't hold.
+- **WHEAT instead of MELON as the *sole* crop** — 25x lower base price isn't compensated by
+  the faster cycle. (WHEAT as a *diversification* partner is the opposite result — a
   crop's solo value and its diversification value are genuinely different questions.)
-- **STRAWBERRY instead of MELON, and as a third crop in the MELON:TOMATO mix** — weaker
-  alone (~$20.5-22.2k) and underperformed the 2-crop 5:2 split (WHEAT, tried later, didn't).
-- **Fewer hands during MELON's pre-harvest dry spell** — labor looked idle days 0-7 with
-  no income yet, so tried a lower HANDS_CAP there; scored lower, not higher. Those early
-  hands are doing essential planting/watering setup for tiles that mature later.
-- **Nearby 3-crop ratios and a 4-crop spread** — 4:1:2 and 4:2:1 MELON:TOMATO:WHEAT, and a
-  4-crop 4:1:1:1 spread adding CARROT, all scored below the 5:1:1 peak.
-- **Re-swept HANDS_CAP and SELL_THROTTLE under the new crop mix** in case the optimum had
-  shifted — both confirmed unchanged. `SEED_BUFFER_PER_WORKER` *did* shift (2→1), since 3
-  crops now compete for seed capital.
+- **STRAWBERRY instead of MELON** — weaker alone (~$20.5-22.2k).
+- **Fewer hands during MELON's pre-harvest dry spell** — those early hands are doing
+  essential planting/watering setup for tiles that mature later, not sitting idle.
 
 Current results (`scripts/evaluate.py`, 10 episodes each, alternating sides), full 720-turn season:
 
 | opponent | our mean $ | their mean $ | win rate |
 |---|---|---|---|
-| pass   | 32744 | 3000 | 10/10 |
-| random | 32767 |   45 | 10/10 |
-| starter| 33365 | 3598 | 10/10 |
+| pass   | 42719 | 3000 | 10/10 |
+| random | 42214 |    0 | 10/10 |
+| starter| 40800 | 3563 | 10/10 |
 
-(Unlike pure MELON, which was identical to 1 decimal across every run — verified via 20
-independent random-seeded episodes with zero variance — the crop mix shows real but modest
-variance across episodes: TOMATO and WHEAT, unlike MELON, are actively traded by other
-agents/town shops, so opponent behavior and weed RNG now genuinely matter a little.
-Confirmed with a 15-episode robustness check on v8: mean $32,892, stdev $372 (~1.1%).)
+Confirmed with a 15-episode robustness check: mean $41,935, stdev $1,653 (~4%) — real
+variance now (land-expansion timing and which extra quadrants get staffed first both add
+some run-to-run noise), but nowhere near enough to explain a +15.5% jump by chance
+(t≈12 vs the v12 baseline).
 
-Next, if there's time: land expansion hasn't been retested since the crop mix changed the
-income-timing picture (WHEAT's fast cycle means the farm no longer has a hard zero-income
-ramp) — worth one more attempt given all three prior rejections assumed single-crop
-economics. Otherwise, the recorded-episode datasets on Kaggle/HF for imitation learning.
+Next, if there's time: the extra-quadrant worker pool (3 each) is itself an unswept
+parameter — picked to keep the Fibonacci hire cost cheap, not tuned for revenue. A finer
+sweep (2, 4, 5 per quadrant) or a non-uniform allocation (more workers on the
+higher-value quadrant) might do better. Otherwise, the recorded-episode datasets on
+Kaggle/HF for imitation learning.

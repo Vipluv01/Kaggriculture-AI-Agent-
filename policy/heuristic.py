@@ -1,6 +1,6 @@
 """Rule-based Kaggriculture agent.
 
-v12: farmer + hired hands each patrol their own band of tiles in a snake
+v13: farmer + hired hands each patrol their own band of tiles in a snake
 pattern; at each tile: harvest if ripe, water if thirsty, dig if spent/weed,
 else plant that worker's assigned crop if seed is held. Sells are throttled
 to 1 unit/turn rather than dumping the whole shed at once (SELL_THROTTLE).
@@ -101,15 +101,36 @@ statistically distinguishable from the baseline at n=15 (t~1.4); kept
 because it's directionally consistent across every threshold tested and
 carries no downside (still fully sells through by game end).
 
+The sixth lever, and the biggest since crop choice: land expansion,
+finally profitable on the 7th attempt after six real, distinct failures
+(v1: no extra labor, weeds; a fixed version with scaled hiring, still worse
+than one quadrant under both TOMATO and MELON; attempt 5: a real
+band-partitioning bug caused a total $0 wipeout; attempt 6, after fixing
+that bug: market absorption is roughly fixed per product -- MARKET_I0 and
+each crop's own T parameter don't scale with land -- so scaling the SAME
+3-crop mix across 4 quadrants crashed MELON to the $1 price floor). What
+finally worked was reading the market curve's own comment properly instead
+of re-deriving the mix by feel: T is documented as "production capacity of
+ONE 5x5 field" -- the env's economics assume a new quadrant grows a
+DIFFERENT product, not more of an already-saturated one. Each extra
+quadrant now gets its own primary crop (NE: STRAWBERRY, SW: CARROT, SE:
+TOMATO, all avoiding MELON specifically) plus a WHEAT diversifier, mirroring
+the shape that won at NW scale.
+
+Getting there also meant discovering a second real constraint that had
+nothing to do with land economics: hands are wiped and hire cost resets to
+Fibonacci's start EVERY DAY, not once -- hiring N hands is a RECURRING daily
+cost of sum(fib(0..N-1)). 10 hands/day is $143 cumulative; 21 hands/day is
+$28,656. An initial design targeting a full 7-worker pool per extra
+quadrant (28 workers total) was a genuine financial collapse (~$1.4-2.2k
+final money) once `market[:10]`'s order-per-turn cap -- which had been
+silently discarding most HIRE attempts and accidentally protecting the
+economy -- was "fixed" to actually reach that target. Cut each extra
+quadrant's pool to QUADRANT_WORKERS=3 (max 15 hands total, ~$376/day
+cumulative) instead. Combined: ~$36.3k -> ~$41.9k (n=15, +15.5%, t~12).
+
 Things tried and dropped, documented so they don't get re-litigated without
 new evidence:
-- Land expansion, tried three times: v1 without extra labor (lost money net
-  -- unwatered tiles turn to weeds). A fixed version with quadrant-scaled
-  hiring under TOMATO still scored lower than the single quadrant. Retested
-  under MELON specifically (higher per-unit price seemed like it might
-  change the math) -- worse again, and by more: MELON's own 10-12 day
-  pre-harvest dry spell compounds with a second quadrant's own ramp-up,
-  leaving too little season left to pay back the capex.
 - Fertilizer, twice. First pass (all crops): bonus is capped by the same
   `min(max_yield, ...)` as ordinary production -- reaches the cap faster,
   never raises it, for MELON and TOMATO specifically (checked the actual
@@ -177,37 +198,8 @@ new evidence:
 - Nearby 3-crop ratios (4:1:2, 4:2:1 MELON:TOMATO:WHEAT) and a 4-crop
   spread (4 MELON:1 each TOMATO/WHEAT/CARROT) all scored below 5:1:1 --
   sacrificing a 2nd MELON worker for broader diversification isn't worth
-  it; one worker's worth of diversification is the right amount.
-- Land expansion, a 5th time: bought as soon as barely affordable (no
-  profit-margin or day gate), with hiring scaled to quadrants owned. Total
-  wipeout ($0 every episode, 0/10 win rate) -- root cause is structural, not
-  financial: `_workable_positions`/`_band_for_worker` redistribute ALL
-  workable tiles (now ~50, not 25) across current workers the instant a
-  quadrant unlocks, but hiring only scales up a day later (hands are
-  rehired once, at hour 0). The existing labor can't water the suddenly-
-  doubled tile count fast enough, tiles go to weed, and
-  buy-seed -> plant -> weed -> dig -> replant drains cash with zero
-  harvests ever completing.
-- Land expansion, a 6th time, after actually fixing the bug found in
-  attempt 5: NW's band assignment was made permanently fixed-size
-  (NW_WORKERS), with only hands hired beyond that routed to newly unlocked
-  land, so an established worker's tile density can never be diluted by a
-  land purchase again. This genuinely fixed the collapse (no more $0
-  wipeouts) but still scored far below the single-quadrant baseline
-  (~$16k vs ~$32.9k) -- the real constraint turned out to be the *market*,
-  not tiles or labor. Worker-crop assignment cycles the same 5:1:1 ratio
-  regardless of worker count, so 4 quadrants' worth of workers (~25 vs 7)
-  scaled MELON/TOMATO/WHEAT production by ~3.5x each -- but market
-  absorption capacity is roughly fixed (MARKET_I0=10000, each crop's own
-  T~200-400) regardless of how much land you farm. Confirmed directly:
-  MELON's price bottomed at $1 (the hard floor) with 4 quadrants of
-  production vs $51 with 1. Land expansion isn't unprofitable because of
-  weeds or dry spells here -- it's that this farm was already producing at
-  roughly the market's absorption ceiling with a single quadrant, and more
-  land just means more product chasing the same limited buyers. Overcoming
-  this would need diversifying into most/all ~9 sellable products
-  simultaneously as land grows, not just scaling the existing 3-crop mix --
-  a substantially bigger redesign, not a further parameter sweep.
+  it; one worker's worth of diversification is the right amount. (This was
+  about NW alone, before land expansion finally worked -- see above.)
 """
 
 # Split workers across three crops (4 MELON : 1 TOMATO : 2 WHEAT) so
@@ -240,7 +232,7 @@ SELL_PRICE_FLOOR_FRAC = 0.4
 # capacity, in which case sell anyway (losing units to overflow discard is
 # worse than a bad price).
 SHED_CAPACITY = 100
-BASE_PRICE = {"TOMATO": 60, "MELON": 250, "CARROT": 35, "WHEAT": 25}
+BASE_PRICE = {"TOMATO": 60, "MELON": 250, "CARROT": 35, "WHEAT": 25, "STRAWBERRY": 120}
 # Only banked money scores -- product still sitting in the shed at the final
 # step is worth nothing. Measured 27 MELON stranded that way (the price-floor
 # hold above never released before the season ended), so the last few days
@@ -265,7 +257,41 @@ CROP_INFO = {
     "MELON": {"seed": 80, "first_yield_day": 10, "max_yield_day": 12, "interval": 0, "max_yield": 6, "ongoing": False},
     "CARROT": {"seed": 20, "first_yield_day": 2, "max_yield_day": 3, "interval": 0, "max_yield": 4, "ongoing": False},
     "WHEAT": {"seed": 10, "first_yield_day": 2, "max_yield_day": 4, "interval": 0, "max_yield": 6, "ongoing": False},
+    "STRAWBERRY": {"seed": 100, "first_yield_day": 10, "max_yield_day": 10, "interval": 2, "max_yield": 4, "ongoing": True},
 }
+
+# Land expansion, redesigned around a real insight instead of re-scaling
+# the same 3-crop mix (which measurably crashed MELON to the $1 price floor
+# when tried before): the market's own T parameter is documented in
+# kaggriculture.py as "production capacity of ONE 5x5 field over a 24-day
+# window" -- the env's economics assume a new quadrant grows a DIFFERENT
+# product, not more of the same one. Each extra quadrant gets its own
+# primary crop (chosen to avoid MELON, the one market we already know
+# saturates hard) plus the same WHEAT-diversifier shape that won at NW
+# scale, and its own worker pool capped like NW's.
+NW_WORKERS = 7  # NW's band stays fixed at this size regardless of land --
+# see the land-expansion docstring entries: diluting an established
+# worker's tile density the instant land unlocks caused a total wipeout
+# once already, independent of this specific crop-mix redesign.
+QUADRANT_WORKERS = 3  # each EXTRA quadrant's own fixed worker pool -- much
+# smaller than NW's 7. Hands are wiped and hire cost resets to Fibonacci's
+# start EVERY DAY (not a one-time cost), so hiring N hands is a RECURRING
+# daily cost of sum(fib(0..N-1)): 10 hands/day is $143 cumulative, but 21
+# hands/day is $28,656 -- discovered the hard way when an earlier version
+# targeted 7 workers x 3 extra quadrants (28 total) and it was a real
+# financial collapse (final money $1.4-2.2k vs the ~$36k baseline), not a
+# land-economics problem. 3 workers/quadrant keeps total hands (up to
+# HANDS_CAP + QUADRANT_WORKERS*3 = 15) in the affordable range.
+QUADRANT_CROP_MIX = {
+    "NE": ["STRAWBERRY", "STRAWBERRY", "WHEAT"],
+    "SW": ["CARROT", "CARROT", "WHEAT"],
+    "SE": ["TOMATO", "TOMATO", "WHEAT"],
+}
+LAND_ORDER = ["NE", "SW", "SE"]
+LAND_PRICES = {"NE": 1000, "SW": 2000, "SE": 4000}
+STARTING_MONEY = 3000
+CASH_RESERVE = 200
+LAND_MIN_DAY = 3
 
 
 def _snake_positions(size):
@@ -278,6 +304,27 @@ def _snake_positions(size):
 def _workable_positions(tiles):
     size = len(tiles)
     return [(x, y) for x, y in _snake_positions(size) if tiles[y][x] != "LOCKED"]
+
+
+def _quadrant_of(x, y, size):
+    half = size // 2
+    return ("N" if y < half else "S") + ("W" if x < half else "E")
+
+
+def _positions_in_quadrant(tiles, quadrant):
+    size = len(tiles)
+    return [
+        (x, y) for x, y in _snake_positions(size)
+        if tiles[y][x] != "LOCKED" and _quadrant_of(x, y, size) == quadrant
+    ]
+
+
+def _shed_tiles(size):
+    """The four inner-corner tiles PICKUP/DROP work from. Farmer and hands
+    spawn on one of these each morning (kaggriculture.py's _default_spawn /
+    _spawn_hand), so any of the four counts, not just one fixed corner."""
+    half = size // 2
+    return [(half - 1, half - 1), (half, half - 1), (half - 1, half), (half, half)]
 
 
 def _band_for_worker(positions, worker_idx, num_workers):
@@ -397,6 +444,26 @@ def _worker_action(tiles, band, pos, seeds_available, day, crop, crop_info, fall
     return [move] if move else ["PASS"]
 
 
+def _worker_quadrant_and_crop(i, extra_unlocked):
+    """Worker index -> (quadrant, crop, local_idx_within_that_quadrant).
+    NW's first NW_WORKERS slots use CROP_MIX exactly as in the
+    single-quadrant version; every quadrant beyond that gets its own fixed
+    QUADRANT_WORKERS-sized pool from QUADRANT_CROP_MIX, filled in unlock
+    order. Returns (None, None, None) if there's no assigned quadrant yet
+    (more workers hired than currently-unlocked land can support --
+    band-staging handles that gracefully, see NW_WORKERS docstring)."""
+    if i < NW_WORKERS:
+        return "NW", CROP_MIX[i % len(CROP_MIX)], i
+    j = i - NW_WORKERS
+    q_idx = j // QUADRANT_WORKERS
+    if q_idx >= len(extra_unlocked):
+        return None, None, None
+    quadrant = extra_unlocked[q_idx]
+    local_idx = j % QUADRANT_WORKERS
+    mix = QUADRANT_CROP_MIX[quadrant]
+    return quadrant, mix[local_idx % len(mix)], local_idx
+
+
 def _fib(n):
     a, b = 1, 1
     for _ in range(n):
@@ -422,17 +489,41 @@ def agent(obs):
     shed = private.get("shed", {})
     hand_positions = [tuple(p) for p in farm.get("hands", [])]
     num_workers = 1 + len(hand_positions)
+    unlocked = set(farm.get("unlocked_quadrants", ["NW"]))
+    extra_unlocked = [q for q in LAND_ORDER if q in unlocked]
+    n_unlocked_extra = len(extra_unlocked)
 
     market = []
 
-    # Re-hire the day's hands at the very start of the day -- cheap (first
-    # few hires cost $1-3) since the env wipes hands and hire cost at EOD.
+    # Buy the next land quadrant only once real farming profit -- not the
+    # opening bankroll -- comfortably covers it, and only after a few days.
+    if n_unlocked_extra < len(LAND_ORDER) and day >= LAND_MIN_DAY:
+        next_quad = LAND_ORDER[n_unlocked_extra]
+        cost = LAND_PRICES[next_quad]
+        if money - STARTING_MONEY >= cost * 2 and money - cost >= CASH_RESERVE:
+            market.append(["BUY_LAND"])
+
+    # Re-hire the day's hands -- cheap (first few hires cost $1-3) since the
+    # env wipes hands and hire cost at EOD. hands_cap can call for 15 with
+    # land unlocked, but only ~10 ever actually land: maxMarketOrdersPerTurn
+    # caps hour 0's whole market list (BUY_LAND + HIRE*N) at 10 total, so
+    # anything past the 10th HIRE entry is silently discarded -- confirmed
+    # via actual hand counts (10, not 15, from mid-game on). That turns out
+    # to be a feature, not a bug worth fixing: hire cost resets and
+    # recompounds EVERY day (see the land-expansion docstring entry), so
+    # this cap keeps the daily hire bill in the cheap end of that curve
+    # (~10 hands is $143/day) instead of the expensive one. Tried lifting it
+    # (spread hiring across multiple turns to actually reach 15+) and it was
+    # a regression -- on days the fuller target still wasn't reached, HIRE
+    # kept competing with SELL/BUY_SEED for market slots all day instead of
+    # just the first turn, starving normal operations of cash.
+    hands_cap = HANDS_CAP + QUADRANT_WORKERS * n_unlocked_extra
     if hour == 0:
         n = hires_today
-        budget = money * 0.5  # never spend more than half the morning's cash on labor
+        budget = max(0.0, money - CASH_RESERVE) * 0.5
         spent = 0
         hired = 0
-        while hired < HANDS_CAP:
+        while hired < hands_cap:
             cost = _fib(n)
             if spent + cost > budget:
                 break
@@ -455,8 +546,9 @@ def agent(obs):
             continue  # hold -- price has crashed, wait for it to recover
         market.append(["SELL", item, min(qty, throttle)])
 
-    worker_crops = [CROP_MIX[i % len(CROP_MIX)] for i in range(num_workers)]
-    crops_in_use = set(worker_crops)
+    worker_info = [_worker_quadrant_and_crop(i, extra_unlocked) for i in range(num_workers)]
+    worker_crops = [c for (_, c, _) in worker_info]
+    crops_in_use = {c for c in worker_crops if c is not None}
     for crop in crops_in_use:
         crop_info = CROP_INFO[crop]
         workers_on_crop = worker_crops.count(crop)
@@ -474,26 +566,24 @@ def agent(obs):
 
     market = market[:10]
 
-    positions = _workable_positions(tiles)
     wheat_seeds_available = seeds.get("WHEAT", 0) > 0
-    farmer_crop = worker_crops[0]
-    farmer_band = _band_for_worker(positions, 0, num_workers)
-    farmer_seeds_available = seeds.get(farmer_crop, 0) > 0
-    farmer_action = _worker_action(
-        tiles, farmer_band, (fx, fy), farmer_seeds_available, day, farmer_crop,
-        CROP_INFO[farmer_crop], wheat_seeds_available,
-    )
+    quadrant_positions = {}  # cache: quadrant -> its workable tile list
 
-    hands_actions = []
-    for i, hp in enumerate(hand_positions, start=1):
-        band = _band_for_worker(positions, i, num_workers)
-        hand_crop = worker_crops[i]
-        hand_seeds_available = seeds.get(hand_crop, 0) > 0
-        hands_actions.append(
-            _worker_action(
-                tiles, band, hp, hand_seeds_available, day, hand_crop,
-                CROP_INFO[hand_crop], wheat_seeds_available,
-            )
+    def dispatch(i, pos):
+        quadrant, crop, local_idx = worker_info[i]
+        if quadrant is None:
+            return ["PASS"]  # more workers hired than land currently supports
+        if quadrant not in quadrant_positions:
+            quadrant_positions[quadrant] = _positions_in_quadrant(tiles, quadrant)
+        pool_size = NW_WORKERS if quadrant == "NW" else QUADRANT_WORKERS
+        band = _band_for_worker(quadrant_positions[quadrant], local_idx, pool_size)
+        seeds_available = seeds.get(crop, 0) > 0
+        return _worker_action(
+            tiles, band, pos, seeds_available, day, crop,
+            CROP_INFO[crop], wheat_seeds_available,
         )
+
+    farmer_action = dispatch(0, (fx, fy))
+    hands_actions = [dispatch(i, hp) for i, hp in enumerate(hand_positions, start=1)]
 
     return {"farmer": farmer_action, "hands": hands_actions, "market": market}
