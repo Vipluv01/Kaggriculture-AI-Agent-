@@ -37,7 +37,7 @@ tar -czf submission.tar.gz main.py policy/
 
 ## Status
 
-v14 heuristic (`policy/heuristic.py`) — current best, ready to submit. Progression:
+v15 heuristic (`policy/heuristic.py`) — current best, ready to submit. Progression:
 
 | version | change | mean $ (10+ episodes/opponent) |
 |---|---|---|
@@ -54,7 +54,8 @@ v14 heuristic (`policy/heuristic.py`) — current best, ready to submit. Progres
 | v11 | +skip watering that buys nothing outside the bonus window | ~36.7k |
 | v12 | +refuse to plant crops that can't mature + season-end liquidation | ~36.3-36.6k |
 | v13 | **land expansion, working**: each extra quadrant grows a different crop | ~41.9k |
-| v14 | **stop buying land nobody can staff**: only NE, not all 3 extra quadrants | **~47.0k** |
+| v14 | stop buying land nobody can staff: only NE, not all 3 extra quadrants | ~47.0k |
+| v15 | **drop NE's WHEAT diversifier**: not needed at NE's small (~3-worker) scale | **~51.3k** |
 
 Real ladder scores (all `COMPLETE` as submitted; scores are a live skill rating against a
 growing ~7000-team opponent pool, not raw dollars, and drift over time for everyone as
@@ -171,21 +172,30 @@ full detail, so they don't get re-litigated without new evidence):
    loses to STRAWBERRY's higher base price ($120 vs $35) at this small a production scale.
    ~$41.9k → ~$47.0k (n=15, +12.1%, t≈8.7).
 
+9. **Drop NE's WHEAT diversifier (v15).** NE's crop mix copied NW's WHEAT-diversifier
+   shape without re-testing whether NE actually needed one. It doesn't: the diversifier
+   exists to stop a single crop saturating its *own* market, which is real at NW's
+   7-worker scale (an all-MELON quadrant measurably crashed MELON's price) but NE only
+   ever gets ~3 workers — too small a production volume to saturate STRAWBERRY's market
+   (`T`=100) on its own. Went all-STRAWBERRY: ~$47.0k → ~$51.3k (n=15, +9.2%, t≈6.8).
+   Also re-tested the land-purchase gating (removing the 2x-profit-margin safety check
+   entirely was a regression — buys land turn 1, draining the capital NW's own dry spell
+   needs; milder 1.0-3.0x multipliers were all within noise of the current 2x) and
+   `HANDS_CAP` (5 and 7 both worse than 6) — both confirmed already well-tuned.
+
 Current results (`scripts/evaluate.py`, 10 episodes each, alternating sides), full 720-turn season:
 
 | opponent | our mean $ | their mean $ | win rate |
 |---|---|---|---|
-| pass   | 47457 | 3000 | 10/10 |
-| random | 45889 |    2 | 10/10 |
-| starter| 46864 | 3579 | 10/10 |
+| pass   | 51800 | 3000 | 10/10 |
+| random | 51706 |    1 | 10/10 |
+| starter| 50948 | 3618 | 10/10 |
 
-Confirmed with a 15-episode robustness check: mean $46,985, stdev $1,542 (~3.3%) — real
-run-to-run variance (land-purchase timing and exactly when NE gets staffed both add some
-noise), but nowhere near enough to explain a +12.1% jump by chance (t≈8.7 vs the v13
-baseline).
+Confirmed with a 15-episode robustness check: mean $51,348, stdev $1,945 (~3.8%) — nowhere
+near enough variance to explain a +9.2% jump by chance (t≈6.8 vs the v14 baseline).
 
-Next, if there's time: with SW/SE now unbought, that $6000 of capital and the land-purchase
-gating logic itself are doing less work than they could — worth checking whether an even
-more aggressive NE-only buy timing (or skipping the profit-margin gate entirely, now that
-there's no risk of over-extending into unworkable quadrants) helps further. Otherwise, the
+Next, if there's time: SW/SE are still unbought placeholders with an untested crop mix —
+worth checking whether *any* second quadrant is viable now that NE's own mix is leaner, or
+whether the ~10-hand ceiling itself is worth attacking directly (e.g. spreading BUY_SEED
+across more turns to free up market-order slots for more HIRE). Otherwise, the
 recorded-episode datasets on Kaggle/HF for imitation learning.

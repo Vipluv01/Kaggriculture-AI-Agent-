@@ -1,6 +1,6 @@
 """Rule-based Kaggriculture agent.
 
-v14: farmer + hired hands each patrol their own band of tiles in a snake
+v15: farmer + hired hands each patrol their own band of tiles in a snake
 pattern; at each tile: harvest if ripe, water if thirsty, dig if spent/weed,
 else plant that worker's assigned crop if seed is held. Sells are throttled
 to 1 unit/turn rather than dumping the whole shed at once (SELL_THROTTLE).
@@ -136,6 +136,14 @@ workers (confirmed directly: NE always filled completely first, SW got 1
 lone worker with no WHEAT diversifier, SE got zero). Buying them anyway
 spent $2000+$4000 on land that was barely-to-never worked. `LAND_ORDER`
 now stops at NE alone. ~$41.9k -> ~$47.0k (n=15, +12.1%, t~8.7).
+
+An eighth followed from questioning an assumption carried over from NW
+rather than re-tested: NE's crop mix copied NW's WHEAT-diversifier shape
+without checking whether NE needed one. It doesn't -- the diversifier
+exists to stop a single crop saturating its OWN market (real at NW's
+7-worker scale), but NE only ever gets ~3 workers, too small a production
+volume to saturate STRAWBERRY's market on its own. Went all-STRAWBERRY,
+no WHEAT: ~$47.0k -> ~$51.3k (n=15, +9.2%, t~6.8).
 
 Things tried and dropped, documented so they don't get re-litigated without
 new evidence:
@@ -290,8 +298,19 @@ QUADRANT_WORKERS = 3  # each EXTRA quadrant's own fixed worker pool -- much
 # financial collapse (final money $1.4-2.2k vs the ~$36k baseline), not a
 # land-economics problem. 3 workers/quadrant keeps total hands (up to
 # HANDS_CAP + QUADRANT_WORKERS*3 = 15) in the affordable range.
+# NE is all-STRAWBERRY, no WHEAT diversifier -- unlike NW, tested and
+# confirmed better without one (~$47.0k -> ~$51.3k, n=15, t~6.8). The
+# WHEAT-diversifier lever exists to stop a single crop's OWN market from
+# saturating; at NW's 7-worker scale that's real (an all-MELON quadrant
+# measurably crashed MELON's price). NE only ever gets ~3 workers (the
+# ~10-hand ceiling, see HIRE comment below), a small enough production
+# volume that STRAWBERRY's own market (T=100) doesn't saturate -- so the
+# diversifier was pure dilution into a lower-value crop for no benefit.
+# SW/SE keep a diversifier since they're currently unbought (LAND_ORDER
+# stops at NE) and untested at this scale -- left as documented
+# placeholders, not verified either way.
 QUADRANT_CROP_MIX = {
-    "NE": ["STRAWBERRY", "STRAWBERRY", "WHEAT"],
+    "NE": ["STRAWBERRY", "STRAWBERRY", "STRAWBERRY"],
     "SW": ["CARROT", "CARROT", "WHEAT"],
     "SE": ["TOMATO", "TOMATO", "WHEAT"],
 }
