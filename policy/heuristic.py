@@ -1,6 +1,6 @@
 """Rule-based Kaggriculture agent.
 
-v13: farmer + hired hands each patrol their own band of tiles in a snake
+v14: farmer + hired hands each patrol their own band of tiles in a snake
 pattern; at each tile: harvest if ripe, water if thirsty, dig if spent/weed,
 else plant that worker's assigned crop if seed is held. Sells are throttled
 to 1 unit/turn rather than dumping the whole shed at once (SELL_THROTTLE).
@@ -128,6 +128,14 @@ silently discarding most HIRE attempts and accidentally protecting the
 economy -- was "fixed" to actually reach that target. Cut each extra
 quadrant's pool to QUADRANT_WORKERS=3 (max 15 hands total, ~$376/day
 cumulative) instead. Combined: ~$36.3k -> ~$41.9k (n=15, +15.5%, t~12).
+
+A seventh discovery followed directly from that ~10-hand ceiling: NW's own
+7 workers plus QUADRANT_WORKERS=3 for NE already consumes the entire
+achievable workforce, so SW and SE -- if bought -- sat staffed with 0-1
+workers (confirmed directly: NE always filled completely first, SW got 1
+lone worker with no WHEAT diversifier, SE got zero). Buying them anyway
+spent $2000+$4000 on land that was barely-to-never worked. `LAND_ORDER`
+now stops at NE alone. ~$41.9k -> ~$47.0k (n=15, +12.1%, t~8.7).
 
 Things tried and dropped, documented so they don't get re-litigated without
 new evidence:
@@ -287,7 +295,19 @@ QUADRANT_CROP_MIX = {
     "SW": ["CARROT", "CARROT", "WHEAT"],
     "SE": ["TOMATO", "TOMATO", "WHEAT"],
 }
-LAND_ORDER = ["NE", "SW", "SE"]
+# LAND_ORDER only lists NE: the ~10-hand ceiling (see the HIRE comment in
+# agent()) means NW(7)+NE(QUADRANT_WORKERS=3) already consumes the whole
+# achievable workforce -- SW and SE, if bought, sat staffed with 0-1
+# workers (confirmed directly: at 11 total workers, NE always filled
+# completely first, SW got 1 lone worker with no WHEAT diversifier, SE got
+# zero). Buying them anyway spent $2000+$4000 on land that was barely-to-
+# never worked. Stopping at NE alone (saving that $6000 and never diluting
+# the achievable workforce across unworkable land) was worth ~$41.9k ->
+# ~$47.0k (n=15, +12.1%, t~8.7) -- almost as large a jump as buying land at
+# all was in the first place.
+# SW/SE's crop-mix entries and price are kept below in case a future
+# change (e.g. a higher achievable hand count) makes them viable again.
+LAND_ORDER = ["NE"]
 LAND_PRICES = {"NE": 1000, "SW": 2000, "SE": 4000}
 STARTING_MONEY = 3000
 CASH_RESERVE = 200

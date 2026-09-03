@@ -37,7 +37,7 @@ tar -czf submission.tar.gz main.py policy/
 
 ## Status
 
-v13 heuristic (`policy/heuristic.py`) — current best, ready to submit. Progression:
+v14 heuristic (`policy/heuristic.py`) — current best, ready to submit. Progression:
 
 | version | change | mean $ (10+ episodes/opponent) |
 |---|---|---|
@@ -50,10 +50,11 @@ v13 heuristic (`policy/heuristic.py`) — current best, ready to submit. Progres
 | v7 | +3-way CROP_MIX: 5 MELON : 1 TOMATO : 1 WHEAT | ~32.5k |
 | v8 | +SEED_BUFFER_PER_WORKER retuned 2→1 for the 3-crop mix | ~32.9k |
 | v9 | +hold inventory below 40% of base price instead of always selling | ~33.1k |
-| v10 | **harvest at max yield, not first legal moment** + retuned mix 4:1:2 | ~36.1k |
+| v10 | harvest at max yield, not first legal moment + retuned mix 4:1:2 | ~36.1k |
 | v11 | +skip watering that buys nothing outside the bonus window | ~36.7k |
 | v12 | +refuse to plant crops that can't mature + season-end liquidation | ~36.3-36.6k |
-| v13 | **land expansion, working**: each extra quadrant grows a different crop | **~41.9k** |
+| v13 | **land expansion, working**: each extra quadrant grows a different crop | ~41.9k |
+| v14 | **stop buying land nobody can staff**: only NE, not all 3 extra quadrants | **~47.0k** |
 
 Real ladder scores (all `COMPLETE` as submitted; scores are a live skill rating against a
 growing ~7000-team opponent pool, not raw dollars, and drift over time for everyone as
@@ -156,21 +157,35 @@ full detail, so they don't get re-litigated without new evidence):
 - **Fewer hands during MELON's pre-harvest dry spell** — those early hands are doing
   essential planting/watering setup for tiles that mature later, not sitting idle.
 
+8. **Stop buying land nobody can staff (v14).** Following directly from the Fibonacci
+   discovery above: NW's 7 workers + `QUADRANT_WORKERS`=3 for NE already consumes the
+   entire ~10-hand ceiling. SW and SE, once bought, sat staffed with 0-1 workers — confirmed
+   directly by inspecting the actual worker→quadrant assignment at day 25: NE always filled
+   completely (3/3) first, SW got exactly 1 lone worker with no WHEAT diversifier, SE got
+   zero. Buying them anyway spent $2000+$4000 on land that was barely-to-never worked.
+   `LAND_ORDER` now stops at NE alone. Swept `QUADRANT_WORKERS` again in this narrower
+   setup (1/2/3/4/5) and re-tried assigning the strongest solo crops (TOMATO, then CARROT)
+   to the always-staffed NE slot instead of STRAWBERRY — both worse: TOMATO overlaps with
+   NW's own TOMATO worker, re-triggering the exact market-saturation problem land
+   diversification was built to avoid, and CARROT's larger market headroom (`T`=450) still
+   loses to STRAWBERRY's higher base price ($120 vs $35) at this small a production scale.
+   ~$41.9k → ~$47.0k (n=15, +12.1%, t≈8.7).
+
 Current results (`scripts/evaluate.py`, 10 episodes each, alternating sides), full 720-turn season:
 
 | opponent | our mean $ | their mean $ | win rate |
 |---|---|---|---|
-| pass   | 42719 | 3000 | 10/10 |
-| random | 42214 |    0 | 10/10 |
-| starter| 40800 | 3563 | 10/10 |
+| pass   | 47457 | 3000 | 10/10 |
+| random | 45889 |    2 | 10/10 |
+| starter| 46864 | 3579 | 10/10 |
 
-Confirmed with a 15-episode robustness check: mean $41,935, stdev $1,653 (~4%) — real
-variance now (land-expansion timing and which extra quadrants get staffed first both add
-some run-to-run noise), but nowhere near enough to explain a +15.5% jump by chance
-(t≈12 vs the v12 baseline).
+Confirmed with a 15-episode robustness check: mean $46,985, stdev $1,542 (~3.3%) — real
+run-to-run variance (land-purchase timing and exactly when NE gets staffed both add some
+noise), but nowhere near enough to explain a +12.1% jump by chance (t≈8.7 vs the v13
+baseline).
 
-Next, if there's time: the extra-quadrant worker pool (3 each) is itself an unswept
-parameter — picked to keep the Fibonacci hire cost cheap, not tuned for revenue. A finer
-sweep (2, 4, 5 per quadrant) or a non-uniform allocation (more workers on the
-higher-value quadrant) might do better. Otherwise, the recorded-episode datasets on
-Kaggle/HF for imitation learning.
+Next, if there's time: with SW/SE now unbought, that $6000 of capital and the land-purchase
+gating logic itself are doing less work than they could — worth checking whether an even
+more aggressive NE-only buy timing (or skipping the profit-margin gate entirely, now that
+there's no risk of over-extending into unworkable quadrants) helps further. Otherwise, the
+recorded-episode datasets on Kaggle/HF for imitation learning.
