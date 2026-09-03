@@ -1,6 +1,6 @@
 """Rule-based Kaggriculture agent.
 
-v11: farmer + hired hands each patrol their own band of tiles in a snake
+v12: farmer + hired hands each patrol their own band of tiles in a snake
 pattern; at each tile: harvest if ripe, water if thirsty, dig if spent/weed,
 else plant that worker's assigned crop if seed is held. Sells are throttled
 to 1 unit/turn rather than dumping the whole shed at once (SELL_THROTTLE).
@@ -26,6 +26,26 @@ worker-turn. Skipping those waterings (water only when in the yield window,
 or when consecutive_unwatered >= 1 and the plant would otherwise weed) was
 worth ~$36.1k -> ~$36.7k (n=15, t~2.3). Re-swept the crop mix again after
 it; 4:1:2 still wins (3:1:3 scores ~$32-33k).
+
+Two end-of-season leaks, found by directly measuring what a full game
+actually did rather than assuming the agent handles edges correctly:
+(1) 25 of 111 plantings in one game could never mature before day 30
+(~$1.4k wasted seed, plus every worker-turn spent tending them) --
+_can_still_mature() now refuses to plant a crop that can't finish in time.
+(2) 27 MELON were stranded in the shed at the final step -- SELL_PRICE_
+FLOOR_FRAC's hold (lever 5) never releases before the season just ends, and
+unsold shed inventory scores zero. The final LIQUIDATION_DAYS now ignore the
+floor and raise the throttle to clear any backlog. Fixing (1) alone was a
+large regression before a follow-up fix: workers whose primary crop can no
+longer mature (~4 of 7, the MELON slice, after day 17) just sat idle
+(PASS actions jumped to 2660) instead of switching to something that still
+could -- added a WHEAT fallback (fastest cycle) for exactly that case, which
+in turn needed WHEAT's seed buffer sized off the whole workforce instead of
+just its own 2 primary growers, or most fallback plantings failed silently
+for lack of seed (605 PLANT actions but only 112 HARVEST, first attempt).
+Net effect small on mean money (~$36.3k -> ~$36.6k, n=15, not clearly
+significant) but meaningfully reduces variance (stdev $729 -> $375) by
+eliminating the worst-case stranded-inventory episodes.
 
 Crop choice was the single biggest lever found: MELON ($250 base price, one
 shot, max_yield=6) beats TOMATO ($60 base price, ongoing, max_yield=4) by
@@ -175,6 +195,13 @@ SELL_PRICE_FLOOR_FRAC = 0.4
 # worse than a bad price).
 SHED_CAPACITY = 100
 BASE_PRICE = {"TOMATO": 60, "MELON": 250, "CARROT": 35, "WHEAT": 25}
+# Only banked money scores -- product still sitting in the shed at the final
+# step is worth nothing. Measured 27 MELON stranded that way (the price-floor
+# hold above never released before the season ended), so the last few days
+# ignore the floor and clear the backlog at any price.
+SEASON_DAYS = 30  # env default (episodeSteps 720 / turnsPerDay 24)
+LIQUIDATION_DAYS = 3  # force-sell during the final N days
+LIQUIDATION_THROTTLE = 6  # and lift the 1/turn cap so the backlog clears
 
 # Mirrors kaggle_environments' CROPS table (kaggriculture.py) for the two
 # crops this agent knows how to farm -- kept local since the submission
@@ -218,6 +245,21 @@ def _band_for_worker(positions, worker_idx, num_workers):
 
 def _crop_exhaust_age(crop_info):
     return crop_info["first_yield_day"] + (crop_info["max_yield"] - 1) * max(1, crop_info["interval"])
+
+
+def _can_still_mature(crop_info, day):
+    """Would a seed planted today reach a harvest before the season ends?
+
+    Planting one that can't is pure loss: the seed cost, plus every
+    worker-turn spent planting and watering a crop nobody will ever harvest.
+    Measured 25 such plantings (~$1.4k of seed) in a single game before this
+    check existed. One-shot crops are harvested at max_yield_day (we wait for
+    full yield); ongoing crops start paying at first_yield_day.
+    """
+    days_needed = (
+        crop_info["max_yield_day"] if not crop_info["ongoing"] else crop_info["first_yield_day"]
+    )
+    return day + days_needed <= SEASON_DAYS - 1
 
 
 def _next_target_in_band(tiles, band, px, py, day, crop_info):
@@ -283,7 +325,7 @@ def _step_toward(fx, fy, tx, ty):
     return None
 
 
-def _worker_action(tiles, band, pos, seeds_available, day, crop, crop_info):
+def _worker_action(tiles, band, pos, seeds_available, day, crop, crop_info, fallback_seeds_available):
     px, py = pos
     tx, ty, state = _next_target_in_band(tiles, band, px, py, day, crop_info)
     if (px, py) == (tx, ty):
@@ -293,8 +335,17 @@ def _worker_action(tiles, band, pos, seeds_available, day, crop, crop_info):
             return ["WATER"]
         if state in ("spent", "weed"):
             return ["DIG"]
-        if state == "empty" and seeds_available:
-            return ["PLANT", crop]
+        if state == "empty":
+            if seeds_available and _can_still_mature(crop_info, day):
+                return ["PLANT", crop]
+            # This worker's assigned crop can no longer mature before the
+            # season ends -- fall back to WHEAT (fastest cycle) rather than
+            # sitting idle for what can be a third of the season. Measured
+            # PASS actions jump from ~2000 to ~2660 without this fallback,
+            # since ~4 of 7 workers (the MELON slice) stop having anything
+            # to plant after day 17.
+            if crop != "WHEAT" and fallback_seeds_available and _can_still_mature(CROP_INFO["WHEAT"], day):
+                return ["PLANT", "WHEAT"]
         return ["PASS"]
     move = _step_toward(px, py, tx, ty)
     return [move] if move else ["PASS"]
@@ -319,6 +370,7 @@ def agent(obs):
     tiles = farm["tiles"]
     money = farm["money"]
     hour = obs.get("hour", 0)
+    day = obs.get("day", 0)
     hires_today = farm.get("hires_today", 0)
     seeds = private.get("seeds", {})
     shed = private.get("shed", {})
@@ -344,35 +396,46 @@ def agent(obs):
         market.extend([["HIRE"]] * hired)
 
     market_prices = (obs.get("market", {}) or {}).get("prices", {})
+    liquidating = day >= SEASON_DAYS - LIQUIDATION_DAYS
+    throttle = LIQUIDATION_THROTTLE if liquidating else SELL_THROTTLE
     for item, qty in shed.items():
         if qty <= 0:
             continue
         base = BASE_PRICE.get(item)
         price = market_prices.get(item)
         near_full = qty >= SHED_CAPACITY - 5
-        if base and price is not None and price < base * SELL_PRICE_FLOOR_FRAC and not near_full:
+        holding_ok = not near_full and not liquidating
+        if base and price is not None and price < base * SELL_PRICE_FLOOR_FRAC and holding_ok:
             continue  # hold -- price has crashed, wait for it to recover
-        market.append(["SELL", item, min(qty, SELL_THROTTLE)])
+        market.append(["SELL", item, min(qty, throttle)])
 
     worker_crops = [CROP_MIX[i % len(CROP_MIX)] for i in range(num_workers)]
     crops_in_use = set(worker_crops)
     for crop in crops_in_use:
         crop_info = CROP_INFO[crop]
         workers_on_crop = worker_crops.count(crop)
-        seed_target = max(1, workers_on_crop) * SEED_BUFFER_PER_WORKER
+        # WHEAT also absorbs every other worker's fallback plantings once
+        # their own crop can no longer mature (see _worker_action) -- size
+        # its buffer off the full workforce, not just its own primary
+        # assignment, or most fallback PLANT attempts fail silently for
+        # lack of seed (measured: 605 PLANT actions but only 112 HARVEST
+        # with an undersized buffer here).
+        target_workers = num_workers if crop == "WHEAT" else workers_on_crop
+        seed_target = max(1, target_workers) * SEED_BUFFER_PER_WORKER
         have = seeds.get(crop, 0)
         if have < seed_target and money >= crop_info["seed"]:
             market.append(["BUY_SEED", crop, seed_target - have])
 
     market = market[:10]
 
-    day = obs.get("day", 0)
     positions = _workable_positions(tiles)
+    wheat_seeds_available = seeds.get("WHEAT", 0) > 0
     farmer_crop = worker_crops[0]
     farmer_band = _band_for_worker(positions, 0, num_workers)
     farmer_seeds_available = seeds.get(farmer_crop, 0) > 0
     farmer_action = _worker_action(
-        tiles, farmer_band, (fx, fy), farmer_seeds_available, day, farmer_crop, CROP_INFO[farmer_crop]
+        tiles, farmer_band, (fx, fy), farmer_seeds_available, day, farmer_crop,
+        CROP_INFO[farmer_crop], wheat_seeds_available,
     )
 
     hands_actions = []
@@ -381,7 +444,10 @@ def agent(obs):
         hand_crop = worker_crops[i]
         hand_seeds_available = seeds.get(hand_crop, 0) > 0
         hands_actions.append(
-            _worker_action(tiles, band, hp, hand_seeds_available, day, hand_crop, CROP_INFO[hand_crop])
+            _worker_action(
+                tiles, band, hp, hand_seeds_available, day, hand_crop,
+                CROP_INFO[hand_crop], wheat_seeds_available,
+            )
         )
 
     return {"farmer": farmer_action, "hands": hands_actions, "market": market}
