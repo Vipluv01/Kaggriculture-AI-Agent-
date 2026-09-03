@@ -157,6 +157,15 @@ full detail, so they don't get re-litigated without new evidence):
 - **STRAWBERRY instead of MELON** — weaker alone (~$20.5-22.2k).
 - **Fewer hands during MELON's pre-harvest dry spell** — those early hands are doing
   essential planting/watering setup for tiles that mature later, not sitting idle.
+- **NW/NE worker-pool reallocation** (`NW_WORKERS`/`QUADRANT_WORKERS`, holding total hands at
+  9) — swept the split from NW=8/NE=1 through NW=4/NE=5; NW=7/NE=2 (the current default) and
+  NW=6/NE=3 are statistically tied (n=15: $50,528 vs $50,408, well inside a ~$700-780
+  standard error), every other split tested clearly worse. Confirms total achievable
+  workforce (~9, gated by the market-order cap, see lever 10) is the real constraint — how
+  it's divided between quadrants barely matters once each side has enough hands to work its
+  own band.
+- **CASH_RESERVE** (50/100/400/800 vs default 200) and **LAND_MIN_DAY** (1/2/5/7 vs default
+  3) — both flat across the whole range tested, no signal above the ~$1-2k run-to-run noise.
 
 8. **Stop buying land nobody can staff (v14).** Following directly from the Fibonacci
    discovery above: NW's 7 workers + `QUADRANT_WORKERS`=3 for NE already consumes the
