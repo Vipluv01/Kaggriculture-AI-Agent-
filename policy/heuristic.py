@@ -131,6 +131,28 @@ new evidence:
   where the yield math is genuinely favorable. Fertilizer is now closed
   off for every crop in this mix, for two different, both-confirmed
   reasons depending on the crop.
+- Animal ranching (SHEEP). Unlike crops, animals have no lifetime yield cap
+  in kaggriculture.py's _daily_refresh_animals, and pending_care_bonus
+  accumulates uncapped within an inter-tick gap (reset only when actually
+  consumed on a fed tick day) -- traced the exact logic and confirmed a
+  real steady-state 3x multiplier for SHEEP (interval=3) with full daily
+  CARE+FEED: 1(base)+2(bonus)=3 units/tick vs 1 without. Built a dedicated
+  "rancher" worker (replacing one MELON slot): BUILD_PASTURE, BUY_ANIMAL,
+  PICKUP/PLACE, daily FEED+CARE, HARVEST+SELL WOOL, with WHEAT feed stock
+  protected from the generic auto-sell loop (same bug shape as the
+  FERTILIZER-reselling one) and PICKUP recognizing all four shed tiles.
+  Confirmed working end-to-end (~33 WOOL sold/game, ~$180 avg realized
+  price, pending_care_bonus sitting at the expected 2-3 steady-state) --
+  but still scored modestly below the single-quadrant baseline (~$34.7k vs
+  ~$36.3k). Tried having the rancher farm WHEAT on its band's other tiles
+  during ranch downtime to recover the idle-tile cost -- barely changed
+  anything, meaning there's little true idle time once shed trips, feed,
+  and care are accounted for. A near miss, not a clean rejection: the
+  underlying mechanic is real and substantial, but one MELON worker's
+  output (boosted by every lever above) currently sets a high bar. Left
+  closed rather than escalated to 2+ animals per rancher, which might
+  close the gap by amortizing the daily shed-trip overhead across more
+  animals -- untested, a real next step if revisited.
 - WHEAT instead of MELON: much faster cycle (first_yield_day=2 vs 10) but
   25x lower base price ($25 vs $250) isn't compensated by the extra cycles.
 - STRAWBERRY instead of MELON: scored ~$20.5-22.2k, well below MELON, and
