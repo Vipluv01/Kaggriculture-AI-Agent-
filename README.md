@@ -183,6 +183,25 @@ full detail, so they don't get re-litigated without new evidence):
    needs; milder 1.0-3.0x multipliers were all within noise of the current 2x) and
    `HANDS_CAP` (5 and 7 both worse than 6) — both confirmed already well-tuned.
 
+10. **Re-verified the ~10-hand ceiling is stale, and re-swept around it (v15, no code change).**
+    The v13/v14 comments described the market-order cap (`maxMarketOrdersPerTurn`=10) as
+    actively truncating HIRE down from a higher target — true when `hands_cap` targeted 15,
+    but stale now: v15's leaner all-STRAWBERRY NE config puts `hands_cap` at 9
+    (`HANDS_CAP`=6 + `QUADRANT_WORKERS`=3), which fits under the cap on its own. Confirmed
+    directly by instrumenting the pre-truncation market-list length across a full game: the
+    cap only bites on ~1-1.5% of turns (always hour 0, when SELL also queues 2-3 items),
+    not every day as the old comment implied. Re-swept `QUADRANT_WORKERS` (4, 5) under this
+    leaner config on the theory that the ceiling reasoning might have changed the optimum —
+    it hasn't: 4 is statistically flat against 3 (n=15: $50,927 vs $50,528, a $399 gap
+    against a ~$700 standard error) and 5 is clearly worse (~$46-47k). `QUADRANT_WORKERS=3`
+    stays. Also tried reprioritizing the rare hour-0 overflow (listing SELL before HIRE, on
+    the theory that a delayed sale is cheaper than a delayed hire) — this was a large,
+    reproducible regression (~$50k → ~$37k, n=30 across 3 opponents, confirmed twice): losing
+    1-2 HIRE entries to truncation costs that whole day's labor for every worker on the
+    payroll, which is far more expensive than a sale sitting in the shed one extra hour.
+    Reverted; comments in `heuristic.py` updated to record the corrected reasoning in place
+    of the stale one.
+
 Current results (`scripts/evaluate.py`, 10 episodes each, alternating sides), full 720-turn season:
 
 | opponent | our mean $ | their mean $ | win rate |
@@ -195,7 +214,8 @@ Confirmed with a 15-episode robustness check: mean $51,348, stdev $1,945 (~3.8%)
 near enough variance to explain a +9.2% jump by chance (t≈6.8 vs the v14 baseline).
 
 Next, if there's time: SW/SE are still unbought placeholders with an untested crop mix —
-worth checking whether *any* second quadrant is viable now that NE's own mix is leaner, or
-whether the ~10-hand ceiling itself is worth attacking directly (e.g. spreading BUY_SEED
-across more turns to free up market-order slots for more HIRE). Otherwise, the
-recorded-episode datasets on Kaggle/HF for imitation learning.
+worth checking whether *any* second quadrant is viable now that NE's own mix is leaner. The
+~10-hand ceiling is no longer a live lever (lever 10: confirmed not binding at the current
+target, and `QUADRANT_WORKERS` is already re-confirmed optimal at 3 under the leaner config)
+so that specific angle is closed. Otherwise, the recorded-episode datasets on Kaggle/HF for
+imitation learning.

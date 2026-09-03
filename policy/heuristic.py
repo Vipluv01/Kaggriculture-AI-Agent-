@@ -543,19 +543,26 @@ def agent(obs):
             market.append(["BUY_LAND"])
 
     # Re-hire the day's hands -- cheap (first few hires cost $1-3) since the
-    # env wipes hands and hire cost at EOD. hands_cap can call for 15 with
-    # land unlocked, but only ~10 ever actually land: maxMarketOrdersPerTurn
-    # caps hour 0's whole market list (BUY_LAND + HIRE*N) at 10 total, so
-    # anything past the 10th HIRE entry is silently discarded -- confirmed
-    # via actual hand counts (10, not 15, from mid-game on). That turns out
-    # to be a feature, not a bug worth fixing: hire cost resets and
-    # recompounds EVERY day (see the land-expansion docstring entry), so
-    # this cap keeps the daily hire bill in the cheap end of that curve
-    # (~10 hands is $143/day) instead of the expensive one. Tried lifting it
-    # (spread hiring across multiple turns to actually reach 15+) and it was
-    # a regression -- on days the fuller target still wasn't reached, HIRE
-    # kept competing with SELL/BUY_SEED for market slots all day instead of
-    # just the first turn, starving normal operations of cash.
+    # env wipes hands and hire cost at EOD. hands_cap is HANDS_CAP(6) +
+    # QUADRANT_WORKERS*n_unlocked_extra = 9 with one extra quadrant (v15's
+    # config), which sits comfortably under maxMarketOrdersPerTurn's cap of
+    # 10 -- confirmed directly (achieved hand count matches the target of 9
+    # exactly, not truncated to some lower ceiling). This is a correction to
+    # an earlier reading of this cap from when hands_cap targeted 15: back
+    # then the cap silently discarded the excess and (by accident) kept the
+    # daily hire bill cheap, which read as a "feature" worth keeping instead
+    # of fixing. Re-verified empirically at the current, leaner target: the
+    # cap is no longer binding day-to-day, so it's not doing any of that
+    # protective work anymore -- QUADRANT_WORKERS=3 (re-swept against 4 and
+    # 5, both flat-to-worse, n=15) is what actually keeps the target small
+    # now. The cap still bites on rare hour-0 turns when SELL also queues
+    # 2-3 items (measured: ~1-1.5% of turns) -- HIRE is listed before SELL
+    # in market on purpose so those turns trim SELL, not HIRE: tried
+    # swapping the priority (SELL first, on the theory that a delayed sale
+    # is cheaper than a delayed hire) and it was a large, reproducible
+    # regression (~$50k -> ~$37k, n=30 across 3 opponents) -- losing even
+    # 1-2 HIRE entries costs that whole day's labor for every worker, which
+    # is far more expensive than a sale sitting in the shed one extra hour.
     hands_cap = HANDS_CAP + QUADRANT_WORKERS * n_unlocked_extra
     if hour == 0:
         n = hires_today
