@@ -246,13 +246,35 @@ was close) before being kept.
   30 (the intended behavior from lever fix v12). No exploitable idle time found here — but
   the same audit's *movement*-share number is what led to lever 11 above.
 
+### Testing methodology: a fourth opponent that actually competes with us
+
+`pass`/`random`/`starter` are all market-inert against every crop this agent grows —
+`starter`'s entire production across a full game is 9 units of CARROT from a single tile
+(confirmed by logging its actual SELL orders and final tile crops), and `pass`/`random` don't
+farm coherently at all. Since `market["inventory"]` is a single counter *shared* between both
+players (confirmed by reading the env source directly: every `SELL` order from either player
+adds to the same per-product inventory that drives `market_price()`), every local result up
+to this point had actually been measuring solo economics — nothing in `evaluate.py` was ever
+real price competition for MELON, STRAWBERRY, or anything else this agent sells. Real Kaggle
+ladder opponents almost certainly include some that do compete for those markets (the
+competition's own tutorial notebook ships a naive single-crop "Melon Maxxer" as a starting
+point — see lever 4's aside — and it's a reasonable bet some fraction of ~7000 ladder teams
+started from something similar). Pulled that exact reference agent from the tutorial notebook
+verbatim into `scripts/melon_maxxer_ref.py` and added it as a fourth `evaluate.py` opponent —
+weak (one farmer, no hands or land, dumps its whole shed at once) but genuinely selling MELON
+into the same shared market we do. Result: our mean money against it ($49,691) lands in the
+same range as against the other three baselines, i.e. its real, if modest, MELON-market
+pressure doesn't measurably hurt us. Kept as a permanent addition to the test suite, not just
+a one-off check, since any future crop-mix change should be validated against it too.
+
 Current results (`scripts/evaluate.py`, 10 episodes each, alternating sides), full 720-turn season:
 
 | opponent | our mean $ | their mean $ | win rate |
 |---|---|---|---|
-| pass   | 51118 | 3000 | 10/10 |
-| random | 50900 |   96 | 10/10 |
-| starter| 51382 | 3543 | 10/10 |
+| pass         | 51118 | 3000 | 10/10 |
+| random       | 50900 |   96 | 10/10 |
+| starter      | 51382 | 3543 | 10/10 |
+| melon_maxxer | 49691 | 4100 | 10/10 |
 
 v15 was confirmed with a 15-episode robustness check: mean $51,348, stdev $1,945 (~3.8%) —
 nowhere near enough variance to explain the v14→v15 +9.2% jump by chance (t≈6.8). v16's
