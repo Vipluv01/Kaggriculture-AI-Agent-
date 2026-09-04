@@ -363,11 +363,23 @@ movement-targeting audit (lever 11) broke that streak. One of those ten — work
 split — later turned out to have been tested on buggy code (a real assignment-overflow bug,
 now fixed, that silently wasted any worker past the 3rd assigned to NE); re-run correctly, it
 still doesn't beat the current default, but for a different, now-understood reason (see the
-corrected entry above) rather than "division doesn't matter." The one remaining idea with
-real (if likely small) potential is a restructured, non-additive multi-quadrant worker split
-— so a second land quadrant (SW/SE) doesn't just dilute the existing ~9-hand budget the way
-it did in the v13/v14 attempts — which would need further logic changes, not parameter
-sweeps, to test properly.
+corrected entry above) rather than "division doesn't matter." The non-additive multi-quadrant
+split (SW alongside NE, sharing the existing worker budget via round-robin instead of adding
+to it) was tested directly once the round-robin assignment fix made it possible: `LAND_ORDER
+= ["NE", "SW"]` with `QUADRANT_WORKERS=1` (NE=1, SW=1, hands_cap safely under the order cap)
+scored $43,053 vs the ~$51,481 baseline — clearly worse, not close. Splitting workers away
+from NE's proven STRAWBERRY output (never crashes, ~$235-285 realized) into an unproven SW
+allocation (CARROT/WHEAT, both already confirmed weaker than STRAWBERRY at NE's own scale in
+lever 8) is a straightforward loss once measured, plus a $2,000 land cost. Also directly
+tested (and closed) this session: whether NE's land purchase could be triggered earlier to
+extend STRAWBERRY's short production window (NE unlocks day 11, STRAWBERRY's first sale
+isn't until day 23, `first_yield_day=10` after that) — the unlock is gated by a `money >=
+5000` threshold that MELON's own harvest jumps past by itself (~$5,200 in one day, day
+11-12); tilting the crop mix toward more early-WHEAT income didn't move the unlock day at
+all (tested 3 WHEAT workers instead of 2 — same day-11 unlock, just less MELON revenue for
+no timing benefit). Both closed with real numbers, not just reasoning. Every structural idea
+flagged as "worth trying with real logic changes" earlier this session has now actually been
+tried.
 
 Otherwise: the recorded-episode datasets on Kaggle/HF, for imitation learning as a possible
 next direction beyond the rule-based approach.
