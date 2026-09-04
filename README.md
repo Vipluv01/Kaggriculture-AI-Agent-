@@ -444,37 +444,60 @@ it came back negative or unconvincing once actually tested:
   second batch reverted to normal variance ($2,705) with a below-baseline mean — a reminder
   that *stdev estimates themselves* are noisy at n=15, not just means; needed a second batch
   to catch this one too.
-- **Adaptive NE crop selection, built and reverted — the implementation risk flagged in
-  advance materialized exactly as predicted, twice.** Given the confirmed shop-demand
-  mechanism (a real, monotonic correlation between unlocked shops and realized STRAWBERRY
-  price/reward — see the "why this exists" note above lever 12), built a runtime version:
-  `_choose_ne_crop()` scores each candidate crop by currently-unlocked shop support
-  (`base_price / T` per matching shop instance, mirroring `kaggriculture.py`'s own `SHOPS`
-  dict locally) and picks the best, with "already has a planted tile" as the recovery
-  mechanism for staying committed once chosen — this agent has no memory beyond the
-  observation, so an existing planted tile is the only way to detect a past decision.
-  First failure mode: candidates included WHEAT/CARROT (one-shot crops), whose tile reverts
-  to empty the instant it's harvested — with all of a crop's tiles planted together and
-  maturing in sync, this created a real window where nothing is planted, the "stay
-  committed" check finds no evidence, and the re-score can land on a *different* crop
-  mid-game. Caught directly: one test run picked WHEAT at day 11, synced-harvested to fully
-  empty around its cycle end, and re-scored onto a different crop — reward $37,632 vs the
-  normal ~$48-51k, existing progress orphaned. Restricted candidates to ongoing crops only
-  (STRAWBERRY, TOMATO), which never fully empty on their own. Second failure mode, same
-  session: ongoing crops still get DUG once "exhausted" (`age >= first_yield_day +
-  (max_yield-1)*interval` — all production ticks used), and TOMATO's exhaust age (~day 22,
-  planted day 11) landed with 8 days of season left, a real window for the same drift; a
-  test run picked TOMATO, drifted to STRAWBERRY mid-game, reward $48,634 — better than the
-  first failure but still a real, uncaught bug, and TOMATO is *also* grown by NW, so even a
-  seed-count-based sticky signal (the fallback idea) would be ambiguous between NW's own use
-  and NE's committed choice. That leaves STRAWBERRY as the only candidate that's actually
-  reliable under this stateless "infer commitment from the board" design, at which point
-  there's no real choice left to make. Reverted entirely rather than keep patching a
-  mechanism whose core assumption (a planted tile reliably survives long enough to encode a
-  decision) doesn't hold for either remaining crop-type category available. The underlying
-  shop-demand finding is still real and still true; exploiting it safely would need genuine
-  persistent state (not available to a stateless per-turn observation-only agent) or a
-  fundamentally different signal than "is a tile currently planted."
+- **Adaptive NE crop selection — three real attempts, each closing off a genuine failure
+  mode, ending in "there's no viable alternative to switch to."** Given the confirmed
+  shop-demand mechanism (a real, monotonic correlation between unlocked shops and realized
+  STRAWBERRY price/reward — see the "why this exists" note above lever 12), tried building a
+  runtime version of NE's crop choice instead of the hardcoded STRAWBERRY.
+
+  *Attempt 1 — board-state sticky detection.* `_choose_ne_crop()` scored each candidate by
+  currently-unlocked shop support (`base_price / T` per matching shop instance, mirroring
+  `kaggriculture.py`'s own `SHOPS` dict locally) and used "does NE already have a planted
+  tile" to detect and stay with a past decision — the agent has no memory beyond the
+  observation, so a planted tile was the only available signal. Broke directly: a one-shot
+  candidate's (WHEAT) tile reverts to empty the instant harvested, and with a whole
+  quadrant's tiles planted together and maturing in sync, that's a real window, not a rare
+  one — the sticky check finds nothing, re-scores against a bigger shop list than the
+  original decision saw, and lands on a different crop mid-game. Caught directly: one run
+  picked WHEAT, synced-harvested to empty, re-scored elsewhere — reward $37,632 vs the
+  normal ~$48-51k, existing progress orphaned.
+
+  *Attempt 2 — restrict to ongoing crops.* STRAWBERRY/TOMATO never fully empty on harvest,
+  so this should fix the sticky check. It didn't: ongoing crops still get DUG once
+  "exhausted" (`age >= first_yield_day + (max_yield-1)*interval`, all production ticks
+  used), and TOMATO's exhaust age landed with real season left, opening the same class of
+  window. One run: TOMATO -> drifted to STRAWBERRY mid-game, reward $48,634 — a smaller
+  loss than attempt 1, but still a real, silently-orphaning bug.
+
+  *Attempt 3 — fix the actual root cause.* The bug was never really about tile detection;
+  it was that the SCORING INPUT (`unlocked_shops`, which only grows) kept changing after the
+  original decision. Confirmed directly that the list is append-only with stable order (the
+  first N entries, once present, never change again — verified across 5 full episodes, one
+  distinct 3-shop prefix per episode, zero drift). Switched to scoring against a **fixed-size
+  prefix** (`unlocked_shops[:NE_SHOP_SIGNAL_SIZE]`) instead of the live list — a pure,
+  time-invariant function once the prefix fills in, so recomputing fresh every turn always
+  reproduces the same answer regardless of what happens to any tile later. This genuinely
+  fixed the drift bug (confirmed: 10/10 clean trials, zero mid-game crop changes, matching
+  the earlier direct verification that the prefix itself never changes). But testing the
+  *fixed* mechanism surfaced a second, independent problem: the shop-based score has no
+  concept of NW/NE market overlap, and picked TOMATO in two episodes out of one n=15 batch —
+  crashing both to ~$36k, the exact market-saturation problem lever 8 already identified
+  ("TOMATO overlaps with NW's own TOMATO worker"). Excluding WHEAT/TOMATO (both already
+  grown by NW) and re-testing with only {STRAWBERRY, CARROT} still came back worse than
+  baseline ($49,233 vs ~$51,550, higher variance) — CARROT-selected episodes underperformed
+  too, consistent with lever 8's own finding that CARROT loses to STRAWBERRY even as NE's
+  sole, fully-committed crop; a simple `base_price/T` shop score doesn't capture that gap.
+  With WHEAT and TOMATO excluded for overlap and CARROT excluded for proven-worse baseline
+  economics, **no candidate crop remains that the shop-demand score could safely prefer over
+  STRAWBERRY** — the feature, correctly built, reduces to "always STRAWBERRY," which is the
+  current hardcoded behavior. Reverted entirely.
+
+  The underlying shop-demand finding is still real and still true (see lever 12's note); it
+  just doesn't create an actionable choice at NE specifically, because the one crop immune
+  to both known failure modes (market overlap and proven-inferior baseline economics) is
+  already what's planted. Worth revisiting only if a future structural change (a genuinely
+  different quadrant, or a crop NW doesn't already grow with economics closer to
+  STRAWBERRY's) reopens a real alternative.
 
 Otherwise: the recorded-episode datasets on Kaggle/HF, for imitation learning as a possible
 next direction beyond the rule-based approach.
