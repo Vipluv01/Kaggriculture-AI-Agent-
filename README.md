@@ -209,6 +209,17 @@ was close) before being kept.
     THROTTLE=2/5 all scored worse or more volatile on an initial pass; 1.5/3 is the setting
     that held up.
 
+    *Why this exists, found afterward by reading the env source further*: the market has a
+    passive demand mechanism neither this docstring nor any earlier session had accounted
+    for. `_town_consume` reduces `market["inventory"]` for every unlocked town shop's product
+    list every `townShopSellInterval` (4 turns, so up to 6x/day) plus every product except
+    FERTILIZER by 1/day from the town center. STRAWBERRY appears in four different shop
+    types (BRUNCH_SPOT, ICE_CREAM_SHOP, SMOOTHIE_SHOP, FARMERS_MARKET) — this is the actual
+    mechanism behind STRAWBERRY's price never crashing despite three workers' worth of
+    output, not just "small production relative to `T`". Shops unlock progressively over the
+    game (up to `MAX_SHOP_INSTANCES`=8), so this demand likely strengthens over a season,
+    which is exactly the kind of window the surge lever is positioned to catch more of.
+
 ### Dropped or rejected (kept so they aren't re-litigated without new evidence)
 
 - **Fertilizer, three times now** — attempt 1-2 (WHEAT, pre-land-expansion): re-derived the
