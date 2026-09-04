@@ -1,6 +1,6 @@
 """Rule-based Kaggriculture agent.
 
-v17: farmer + hired hands each patrol their own band of tiles, always
+v18: farmer + hired hands each patrol their own band of tiles, always
 stepping toward whichever actionable tile in the band is nearest (not a
 fixed traversal order); at each tile: harvest if ripe, water if thirsty,
 dig if spent/weed, else plant that worker's assigned crop if seed is held.
@@ -8,7 +8,25 @@ Sells are throttled to 1 unit/turn (SELL_THROTTLE) rather than dumping the
 whole shed at once, except during a genuine scarcity-premium price surge
 (SELL_SURGE_FRAC/SELL_SURGE_THROTTLE), where selling faster captures more
 of the good window instead of trickling out at the same flat rate used
-during normal or bad pricing.
+during normal or bad pricing. Inventory is held instead of sold below
+SELL_PRICE_FLOOR_FRAC (0.5) of base price, unless the shed is nearly full.
+
+Thirteenth lever: retuned SELL_PRICE_FLOOR_FRAC from 0.4 to 0.5 using a
+real competitor, not just weak ones (v18). 0.4 was tuned back when the
+only test opponents were pass/random/starter -- all market-inert against
+every crop this agent grows (see the melon_maxxer_plus entry in README).
+Built a genuine MELON-competition stress test (melon_maxxer_plus: the
+tutorial's naive bot, fixed and given 5 hired hands) and found this agent
+takes a real, confirmed ~10% mean-money hit under real shared-market
+pressure that weak opponents can't surface at all. Re-swept the floor
+specifically against that competitor: 0.5 landed a real, tight gain over
+0.4 (combined n=30 mean $47,806 vs $45,983, ~+4%, consistent across two
+batches each), and -- checked deliberately, since 0.6 was tried too and
+cost real money against weak opponents (~$1,500) -- 0.5 costs nothing
+there: combined n=30 mean $51,591 vs the ~$51,481-51,550 baseline, flat
+to slightly positive, with lower variance in both scenarios (~$2,061
+weak, ~$2,679 competitive, vs baseline's ~$2,600-2,900 either way). A
+genuinely better setting on both fronts, not a trade-off.
 
 Twelfth lever: sell faster during a real price surge (v17). This session's
 local money mean has been flat against every parameter re-swept for a
@@ -282,10 +300,15 @@ SELL_THROTTLE = 1  # cap units sold per turn -- large one-shot dumps (a
 # game end: confirmed 0 units stranded in the shed at the final step) lets
 # the market's slow daily consumption (-1 unit/day for MELON) recover
 # between each unit instead of quoting many units against the same dump.
-SELL_PRICE_FLOOR_FRAC = 0.4
+SELL_PRICE_FLOOR_FRAC = 0.5
 # price has crashed below this fraction of base -- unless shed is close to
 # capacity, in which case sell anyway (losing units to overflow discard is
-# worse than a bad price).
+# worse than a bad price). Retuned 0.4 -> 0.5 in v18 after building a real
+# competitor to test against (melon_maxxer_plus, README) instead of only
+# weak/market-inert ones -- 0.5 is a genuine improvement on both fronts,
+# not a trade-off: +~4% (n=30) under real MELON-market competition, flat
+# to slightly positive (n=30) against weak opponents too, with lower
+# variance than 0.4 either way.
 SELL_SURGE_FRAC = 1.5  # sell faster than SELL_THROTTLE when price is at or
 SELL_SURGE_THROTTLE = 3  # above this multiple of base (a real scarcity
 # premium, not just noise -- STRAWBERRY alone was seen realizing up to

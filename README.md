@@ -37,7 +37,7 @@ tar -czf submission.tar.gz main.py policy/
 
 ## Status
 
-v17 heuristic (`policy/heuristic.py`) — current best, submitted. Progression:
+v18 heuristic (`policy/heuristic.py`) — current best, submitted. Progression:
 
 | version | change | mean $ (10+ episodes/opponent) |
 |---|---|---|
@@ -57,7 +57,8 @@ v17 heuristic (`policy/heuristic.py`) — current best, submitted. Progression:
 | v14 | stop buying land nobody can staff: only NE, not all 3 extra quadrants | ~47.0k |
 | v15 | **drop NE's WHEAT diversifier**: not needed at NE's small (~3-worker) scale | ~51.3k |
 | v16 | nearest-actionable-tile targeting instead of fixed snake-order traversal | ~51.5k |
-| v17 | sell faster during a real price surge (SELL_SURGE_FRAC/THROTTLE) | ~51.6k, lower variance — **ladder 486.6** (see note below re: score volatility) |
+| v17 | sell faster during a real price surge (SELL_SURGE_FRAC/THROTTLE) | ~51.6k, lower variance — ladder 486.6 (see note below re: score volatility) |
+| v18 | retuned SELL_PRICE_FLOOR_FRAC 0.4→0.5, validated against real competition | ~51.6k weak, **~47.8k vs real competitor (+4%)** |
 
 Real ladder scores (all `COMPLETE`; scores are a live skill rating against a growing ~7000-team
 opponent pool, not raw dollars, and drift over time for everyone as that pool strengthens —
@@ -71,7 +72,8 @@ that's itself informative: v16's score held flat at 460.8 across the same window
 isn't pool-wide drift, it's noise in how early/how-few evaluation games a fresh submission's
 number is based on before it settles. Treat a submission's score as unreliable until it's
 been re-checked at least once; 486.6 (still above v16's 460.8) is the number to trust here,
-not the initial 600.0.
+not the initial 600.0. (Later re-check: 495.1, drifting with the pool as documented above.)
+**v18=pending submission.**
 
 ### Levers found
 
@@ -224,6 +226,19 @@ was close) before being kept.
     output, not just "small production relative to `T`". Shops unlock progressively over the
     game (up to `MAX_SHOP_INSTANCES`=8), so this demand likely strengthens over a season,
     which is exactly the kind of window the surge lever is positioned to catch more of.
+13. **Retune SELL_PRICE_FLOOR_FRAC against real competition, not just weak opponents (v18).**
+    0.4 (lever 5) was tuned when `pass`/`random`/`starter` were the only test opponents —
+    all market-inert against every crop this agent grows. Built a genuine stress test instead
+    of another weak one: `melon_maxxer_plus` (see the testing-methodology section) confirmed a
+    real ~10% mean-money hit under actual shared-market competition. Re-swept the floor
+    specifically against it: 0.6 landed a big gain there (+~$2,323, n=30, t≈2.8) but cost
+    real money against weak opponents (~$1,500, confirmed directly) — a genuine trade-off.
+    0.5 turned out not to be a trade-off at all: **+~4% against real competition** (combined
+    n=30: $47,806 vs $45,983, tight agreement across two batches each side, ~$300 apart) while
+    landing flat-to-slightly-positive against weak opponents (combined n=30: $51,591 vs the
+    ~$51,481-51,550 baseline) — and with *lower* variance than 0.4 in both scenarios (~$2,061
+    weak vs baseline's ~$2,600-2,765; ~$2,679 competitive vs baseline's ~$2,775). A genuinely
+    better setting on every axis measured, not a bet on one kind of opponent over another.
 
 ### Dropped or rejected (kept so they aren't re-litigated without new evidence)
 
