@@ -57,7 +57,7 @@ v17 heuristic (`policy/heuristic.py`) — current best, submitted. Progression:
 | v14 | stop buying land nobody can staff: only NE, not all 3 extra quadrants | ~47.0k |
 | v15 | **drop NE's WHEAT diversifier**: not needed at NE's small (~3-worker) scale | ~51.3k |
 | v16 | nearest-actionable-tile targeting instead of fixed snake-order traversal | ~51.5k |
-| v17 | sell faster during a real price surge (SELL_SURGE_FRAC/THROTTLE) | ~51.6k, lower variance — **ladder 600.0** |
+| v17 | sell faster during a real price surge (SELL_SURGE_FRAC/THROTTLE) | ~51.6k, lower variance — **ladder 486.6** (see note below re: score volatility) |
 
 Real ladder scores (all `COMPLETE`; scores are a live skill rating against a growing ~7000-team
 opponent pool, not raw dollars, and drift over time for everyone as that pool strengthens —
@@ -66,7 +66,12 @@ v3=201.2, v4 climbed 372.7→441.4→439.7→426.6 across re-submits while it wa
 v5=361.6, v6=445.9, v7=398.9, v8=426.6, v9=440.2, v10=473.1, v11=406.7, v12=416.5, v13=489.2,
 v14=466.8, v15=499.4 (later re-checks of the same submission ranged 452.3-509.5, a useful
 reminder the number moves with the live pool even for unchanged code), v16=460.8,
-**v17=600.0 — first submission clear of 500, and a large jump over v16's 460.8**.
+**v17: first read 600.0, re-checked minutes later at 486.6** — a large single-submission swing
+that's itself informative: v16's score held flat at 460.8 across the same window, so this
+isn't pool-wide drift, it's noise in how early/how-few evaluation games a fresh submission's
+number is based on before it settles. Treat a submission's score as unreliable until it's
+been re-checked at least once; 486.6 (still above v16's 460.8) is the number to trust here,
+not the initial 600.0.
 
 ### Levers found
 
@@ -423,6 +428,34 @@ production counts. So the variance is real but external: path-dependent price re
 the smaller-volume crops, not a fixable gap in this agent's decisions -- there's no
 production or timing slack left to reclaim locally; what's left is noise in the shared
 market's exact event ordering.
+
+**Post-v17 investigation, chasing the shop-demand finding further.** Confirmed the
+shop-consumption mechanism (above) correlates cleanly and monotonically with realized
+STRAWBERRY price and final reward across direct measurement (1 shop → $213.8/unit, $48.7k
+reward; 6 shops → $291-312/unit, $53-56k reward). That's real, but every attempt to *act* on
+it came back negative or unconvincing once actually tested:
+- Lowering `SELL_SURGE_FRAC` (globally to 1.2, and STRAWBERRY-specific to 1.2 via a new
+  `SELL_SURGE_FRAC_BY_CROP` override) both scored worse and more volatile than 1.5 — selling
+  3x as fast into a merely-modest premium seems to crash it before it's captured, unlike a
+  genuine 1.5x+ scarcity premium which has room to absorb faster selling. Reverted both,
+  including the now-unused override infrastructure (kept no dead config knobs around).
+- Re-swept `CASH_RESERVE` (100/400/800) under the current surge-active code: 800 looked like
+  a real variance win on a first n=15 batch (stdev $1,939 vs baseline's ~$2,600-2,765) but a
+  second batch reverted to normal variance ($2,705) with a below-baseline mean — a reminder
+  that *stdev estimates themselves* are noisy at n=15, not just means; needed a second batch
+  to catch this one too.
+- Considered a genuine adaptive fix (choose NE's crop at runtime based on `town.unlocked_shops`
+  observed by day 11, hedging against bad STRAWBERRY-shop draws) but did the math before
+  building it: a always-on hedge (2 STRAWBERRY + 1 WHEAT, the simplest version) has a
+  confirmed, real cost of ~$4,700 mean, permanently, every game — and the observed
+  STRAWBERRY revenue spread (~$4.4k worst-observed to ~$17k best-observed) is close enough to
+  that fixed cost that a genuinely adaptive version's edge would be thin, resting on a weak
+  signal (only 3 of 8 shops are known at NE's actual decision point) implemented through a
+  real correctness hazard (crop assignment would need to become runtime-dynamic *and* sticky
+  across turns once a tile is planted, or existing planted tiles orphan under a reassigned
+  crop). Decided the expected value didn't clear the bar for the implementation risk and
+  didn't build it — a reasoned pass, not a tested-and-rejected one, so worth revisiting if a
+  cleaner way to get the timing/signal-quality tradeoff right turns up.
 
 Otherwise: the recorded-episode datasets on Kaggle/HF, for imitation learning as a possible
 next direction beyond the rule-based approach.
