@@ -1,11 +1,30 @@
 """Rule-based Kaggriculture agent.
 
-v16: farmer + hired hands each patrol their own band of tiles, always
+v17: farmer + hired hands each patrol their own band of tiles, always
 stepping toward whichever actionable tile in the band is nearest (not a
 fixed traversal order); at each tile: harvest if ripe, water if thirsty,
 dig if spent/weed, else plant that worker's assigned crop if seed is held.
-Sells are throttled to 1 unit/turn rather than dumping the whole shed at
-once (SELL_THROTTLE).
+Sells are throttled to 1 unit/turn (SELL_THROTTLE) rather than dumping the
+whole shed at once, except during a genuine scarcity-premium price surge
+(SELL_SURGE_FRAC/SELL_SURGE_THROTTLE), where selling faster captures more
+of the good window instead of trickling out at the same flat rate used
+during normal or bad pricing.
+
+Twelfth lever: sell faster during a real price surge (v17). This session's
+local money mean has been flat against every parameter re-swept for a
+while (see README) -- but a large, well-documented chunk of the remaining
+episode-to-episode variance turned out to be genuinely external: comparing
+worst/best episodes showed near-identical production (same HARVEST/PLANT
+counts every time) with realized STRAWBERRY price swinging 240.6-303.1
+regardless. Given that swing is real and sometimes lands well above base,
+selling MORE (not just the flat SELL_THROTTLE) while price sits >=1.5x
+base captures more of it. Validated across three independent n=15
+batches, tighter agreement than the false alarms this session flagged for
+exactly this reason: mean $51,982/$51,150/$51,518 (combined ~$51,550,
+essentially flat vs baseline) but consistently lower variance (stdev
+$1,689/$2,163/$2,489 vs baseline's ~$2,600-2,765) -- same profile as the
+v12 liquidation lever (small/flat mean, real variance cut), kept for the
+same reason.
 
 Eleventh lever: nearest-actionable-tile targeting instead of fixed
 snake-order targeting (v16). Found by auditing the actual action
@@ -267,6 +286,17 @@ SELL_PRICE_FLOOR_FRAC = 0.4
 # price has crashed below this fraction of base -- unless shed is close to
 # capacity, in which case sell anyway (losing units to overflow discard is
 # worse than a bad price).
+SELL_SURGE_FRAC = 1.5  # sell faster than SELL_THROTTLE when price is at or
+SELL_SURGE_THROTTLE = 3  # above this multiple of base (a real scarcity
+# premium, not just noise -- STRAWBERRY alone was seen realizing up to
+# 2.4-2.5x its $120 base). Modest but consistent across three independent
+# n=15 batches: mean $51,982/$51,150/$51,518 (combined ~$51,550, essentially
+# flat vs the ~$51,481 baseline) but visibly LOWER variance in all three
+# (stdev $1,689/$2,163/$2,489, avg ~$2,113 vs baseline's ~$2,600-2,765) --
+# same profile as the v12 liquidation lever (small/flat mean, real variance
+# cut), kept for the same reason: fewer bad-luck episodes without giving up
+# expected value. FRAC=1.3/2.0 and THROTTLE=2/5 all tested worse or more
+# volatile on a quick pass; 1.5/3 is the validated setting.
 SHED_CAPACITY = 100
 BASE_PRICE = {"TOMATO": 60, "MELON": 250, "CARROT": 35, "WHEAT": 25, "STRAWBERRY": 120}
 # Only banked money scores -- product still sitting in the shed at the final
@@ -632,7 +662,13 @@ def agent(obs):
         holding_ok = not near_full and not liquidating
         if base and price is not None and price < base * SELL_PRICE_FLOOR_FRAC and holding_ok:
             continue  # hold -- price has crashed, wait for it to recover
-        market.append(["SELL", item, min(qty, throttle)])
+        item_throttle = throttle
+        if base and price is not None and price >= base * SELL_SURGE_FRAC and not liquidating:
+            # Price is unusually good (scarcity premium) -- sell faster
+            # while it lasts instead of trickling out at the same flat rate
+            # used during normal/bad pricing.
+            item_throttle = SELL_SURGE_THROTTLE
+        market.append(["SELL", item, min(qty, item_throttle)])
 
     worker_info = [_worker_quadrant_and_crop(i, extra_unlocked) for i in range(num_workers)]
     worker_crops = [c for (_, c, _) in worker_info]

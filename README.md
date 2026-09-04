@@ -37,7 +37,7 @@ tar -czf submission.tar.gz main.py policy/
 
 ## Status
 
-v16 heuristic (`policy/heuristic.py`) — current best, submitted. Progression:
+v17 heuristic (`policy/heuristic.py`) — current best, submitted. Progression:
 
 | version | change | mean $ (10+ episodes/opponent) |
 |---|---|---|
@@ -56,14 +56,17 @@ v16 heuristic (`policy/heuristic.py`) — current best, submitted. Progression:
 | v13 | **land expansion, working**: each extra quadrant grows a different crop | ~41.9k |
 | v14 | stop buying land nobody can staff: only NE, not all 3 extra quadrants | ~47.0k |
 | v15 | **drop NE's WHEAT diversifier**: not needed at NE's small (~3-worker) scale | ~51.3k |
-| v16 | nearest-actionable-tile targeting instead of fixed snake-order traversal | **~51.5k** |
+| v16 | nearest-actionable-tile targeting instead of fixed snake-order traversal | ~51.5k |
+| v17 | sell faster during a real price surge (SELL_SURGE_FRAC/THROTTLE) | **~51.6k, lower variance** |
 
 Real ladder scores (all `COMPLETE`; scores are a live skill rating against a growing ~7000-team
 opponent pool, not raw dollars, and drift over time for everyone as that pool strengthens —
 same-window comparisons are what's meaningful, not the absolute number): v1=267.1, v2=263.3,
 v3=201.2, v4 climbed 372.7→441.4→439.7→426.6 across re-submits while it was being tuned,
 v5=361.6, v6=445.9, v7=398.9, v8=426.6, v9=440.2, v10=473.1, v11=406.7, v12=416.5, v13=489.2,
-v14=466.8, v15=499.4, **v16=pending submission**.
+v14=466.8, v15=499.4 (later re-checks of the same submission ranged 452.3-509.5, a useful
+reminder the number moves with the live pool even for unchanged code), v16=460.8,
+**v17=pending submission**.
 
 ### Levers found
 
@@ -188,6 +191,23 @@ was close) before being kept.
     $50,420), the tight batch-to-batch agreement within each config being the main reason
     for confidence here (contrast the LIQUIDATION_DAYS entry below, where a $1,615
     batch-to-batch swing on one config was the tell that it was noise, not a real effect).
+12. **Sell faster during a real price surge (v17).** With mean money flat against nearly
+    everything re-swept for a while, traced the remaining episode variance directly instead:
+    worst/best episodes had near-identical production (same HARVEST/PLANT counts every
+    time), but realized STRAWBERRY price swung 240.6-303.1 regardless — production is fully
+    deterministic against these opponents, but price realization on the lower-volume crops
+    isn't. Since that swing is real and sometimes lands well above base, `SELL_SURGE_FRAC`
+    (1.5x base) now triggers `SELL_SURGE_THROTTLE` (3, up from the normal 1/turn) to capture
+    more of a genuine scarcity premium instead of trickling it out at the flat rate meant for
+    normal/bad pricing. Validated across three independent n=15 batches — deliberately more
+    than the two-batch minimum, since this session's SELL_PRICE_FLOOR_FRAC entry below is the
+    reminder that two isn't always enough for a subtle effect: mean $51,982/$51,150/$51,518
+    (combined ~$51,550, essentially flat vs the ~$51,481 baseline) but consistently lower
+    variance in all three (stdev $1,689/$2,163/$2,489 vs baseline's ~$2,600-2,765) — the same
+    small-mean/real-variance-cut profile as the v12 liquidation lever, and kept for the same
+    reason: fewer bad-luck episodes without giving up expected value. FRAC=1.3/2.0 and
+    THROTTLE=2/5 all scored worse or more volatile on an initial pass; 1.5/3 is the setting
+    that held up.
 
 ### Dropped or rejected (kept so they aren't re-litigated without new evidence)
 
