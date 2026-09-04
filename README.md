@@ -444,18 +444,37 @@ it came back negative or unconvincing once actually tested:
   second batch reverted to normal variance ($2,705) with a below-baseline mean — a reminder
   that *stdev estimates themselves* are noisy at n=15, not just means; needed a second batch
   to catch this one too.
-- Considered a genuine adaptive fix (choose NE's crop at runtime based on `town.unlocked_shops`
-  observed by day 11, hedging against bad STRAWBERRY-shop draws) but did the math before
-  building it: a always-on hedge (2 STRAWBERRY + 1 WHEAT, the simplest version) has a
-  confirmed, real cost of ~$4,700 mean, permanently, every game — and the observed
-  STRAWBERRY revenue spread (~$4.4k worst-observed to ~$17k best-observed) is close enough to
-  that fixed cost that a genuinely adaptive version's edge would be thin, resting on a weak
-  signal (only 3 of 8 shops are known at NE's actual decision point) implemented through a
-  real correctness hazard (crop assignment would need to become runtime-dynamic *and* sticky
-  across turns once a tile is planted, or existing planted tiles orphan under a reassigned
-  crop). Decided the expected value didn't clear the bar for the implementation risk and
-  didn't build it — a reasoned pass, not a tested-and-rejected one, so worth revisiting if a
-  cleaner way to get the timing/signal-quality tradeoff right turns up.
+- **Adaptive NE crop selection, built and reverted — the implementation risk flagged in
+  advance materialized exactly as predicted, twice.** Given the confirmed shop-demand
+  mechanism (a real, monotonic correlation between unlocked shops and realized STRAWBERRY
+  price/reward — see the "why this exists" note above lever 12), built a runtime version:
+  `_choose_ne_crop()` scores each candidate crop by currently-unlocked shop support
+  (`base_price / T` per matching shop instance, mirroring `kaggriculture.py`'s own `SHOPS`
+  dict locally) and picks the best, with "already has a planted tile" as the recovery
+  mechanism for staying committed once chosen — this agent has no memory beyond the
+  observation, so an existing planted tile is the only way to detect a past decision.
+  First failure mode: candidates included WHEAT/CARROT (one-shot crops), whose tile reverts
+  to empty the instant it's harvested — with all of a crop's tiles planted together and
+  maturing in sync, this created a real window where nothing is planted, the "stay
+  committed" check finds no evidence, and the re-score can land on a *different* crop
+  mid-game. Caught directly: one test run picked WHEAT at day 11, synced-harvested to fully
+  empty around its cycle end, and re-scored onto a different crop — reward $37,632 vs the
+  normal ~$48-51k, existing progress orphaned. Restricted candidates to ongoing crops only
+  (STRAWBERRY, TOMATO), which never fully empty on their own. Second failure mode, same
+  session: ongoing crops still get DUG once "exhausted" (`age >= first_yield_day +
+  (max_yield-1)*interval` — all production ticks used), and TOMATO's exhaust age (~day 22,
+  planted day 11) landed with 8 days of season left, a real window for the same drift; a
+  test run picked TOMATO, drifted to STRAWBERRY mid-game, reward $48,634 — better than the
+  first failure but still a real, uncaught bug, and TOMATO is *also* grown by NW, so even a
+  seed-count-based sticky signal (the fallback idea) would be ambiguous between NW's own use
+  and NE's committed choice. That leaves STRAWBERRY as the only candidate that's actually
+  reliable under this stateless "infer commitment from the board" design, at which point
+  there's no real choice left to make. Reverted entirely rather than keep patching a
+  mechanism whose core assumption (a planted tile reliably survives long enough to encode a
+  decision) doesn't hold for either remaining crop-type category available. The underlying
+  shop-demand finding is still real and still true; exploiting it safely would need genuine
+  persistent state (not available to a stateless per-turn observation-only agent) or a
+  fundamentally different signal than "is a tile currently planted."
 
 Otherwise: the recorded-episode datasets on Kaggle/HF, for imitation learning as a possible
 next direction beyond the rule-based approach.
