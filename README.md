@@ -248,6 +248,15 @@ was close) before being kept.
   single n=10 pass ($52,063) and averaged $50,749 over two n=15 batches, below the ~$51,481
   baseline; 2 scored $50,442 and 5 scored $50,779. 1 stays. Another clean catch by the
   two-batch rule.
+- **SELL_PRICE_FLOOR_FRAC, re-swept** (was last tuned at v9, pre-land-expansion, single
+  MELON+TOMATO+WHEAT mix) — with the shed now sitting near-full (99/100) most games, disabling
+  the hold entirely (0.0: always sell, never wait for a better price) looked like a real find
+  on two n=15 batches ($51,304 then $52,466, both above the ~$51,481 baseline with visibly
+  lower variance) before a third batch pulled it back to flat ($50,954; combined n=45 mean
+  $51,574, essentially the baseline). Unlike lever 11's tight two-batch agreement, the spread
+  across these three (51.3k/52.5k/51.0k) was wide enough that a third batch was worth running
+  — a useful data point on when two batches alone aren't enough. 0.2/0.3/0.5 all scored
+  lower on the initial n=10 pass and weren't pursued further. 0.4 stays.
 - **Animal ranching (SHEEP)** — traced the CARE-bonus mechanic precisely and confirmed a real
   steady-state 3x production multiplier with full daily care. Built a dedicated rancher
   worker end-to-end (pasture, animal, daily feed/care, harvest/sell) — confirmed working,
