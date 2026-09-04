@@ -618,6 +618,16 @@ def agent(obs):
             continue
         base = BASE_PRICE.get(item)
         price = market_prices.get(item)
+        # NOT a bug -- do not "fix" this to sum(shed.values()). shedCapacity
+        # really does bound the SUM of every item, so comparing one item's
+        # qty against it means this release valve never fires (the fullest a
+        # single crop gets is ~72 MELON; the shed as a whole peaks at 99/100).
+        # Correcting it is a measured regression: >= CAP-5 on the total
+        # scored $50,526/$50,407 over two n=15 batches and >= CAP-1 scored
+        # $50,047, vs a ~$51,481 baseline. Making the valve work forces sales
+        # into crashed prices, which costs more than the overflow it guards
+        # against -- and that overflow never actually happens, since the shed
+        # tops out at 99/100 without discarding.
         near_full = qty >= SHED_CAPACITY - 5
         holding_ok = not near_full and not liquidating
         if base and price is not None and price < base * SELL_PRICE_FLOOR_FRAC and holding_ok:

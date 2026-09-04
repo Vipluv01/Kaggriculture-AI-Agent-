@@ -216,11 +216,38 @@ was close) before being kept.
   getting the bonus requires fertilizing 1-2 days *before* a scheduled tick, not just
   whenever it's safe to. Confirmed empirically: STRAWBERRY revenue was flat-to-worse with
   fertilizer active (71 units/$21,203 vs baseline 78/$21,965) despite `FERTILIZE` firing 55
-  times in one game — the applications just weren't landing on tick days. Properly exploiting
-  it would need real interval-aware scheduling, not opportunistic timing; reverted rather
-  than build that without a clearer sense it would pay off enough to justify the added
-  complexity, given even the STRAWBERRY-specific dollar math is a smaller margin (~$150/
-  application, before the trip and now also before this timing problem) than it first looked.
+  times in one game — the applications just weren't landing on tick days. So attempt 4 built
+  the interval-aware version properly: `_fertilize_due()` computes whether *tomorrow* is a
+  scheduled tick and makes "fertilize" a real lowest-priority target state inside
+  `_next_target_in_band`, so a worker actually walks to a due tile once nothing more urgent
+  is outstanding. That fixed the targeting (zero weed-conversions, tick-aligned applications)
+  and still lost — and measuring *why* finally produced the real, structural answer: **the
+  shed is a shared 100-slot store that the MELON operation already keeps at 99/100.** Every
+  FERTILIZER unit competes with harvested produce for those slots, and worse, carried
+  inventory is dropped back to the shed at end of day (`_drop_inventories_to_shed`) where a
+  full shed simply discards it — so each worker's unused unit evaporates nightly and gets
+  repurchased next morning. Measured: **332 FERTILIZER units bought (~$33,200) to land ~17
+  actual applications.** That's not a tuning problem; there is no room in the shed for a
+  second inventory type at this production scale. Four variants tested (naive priority
+  $36-41k and destroying crops; PASS-gated $48k but inert; tile-safe opportunistic $43-45k;
+  tick-aligned targeting $43k) against a ~$51.5k baseline. Closed for good unless the MELON
+  stockpile itself shrinks enough to free shed space.
+- **"Fixing" the `near_full` shed check — a measured regression, please leave it alone.**
+  `near_full = qty >= SHED_CAPACITY - 5` compares a *single item's* quantity against the cap,
+  but `shedCapacity` actually bounds the *sum* of every item (the env gates deposits on
+  `sum(private["shed"].values()) >= shed_capacity`). So the release valve on lever 5's
+  price-floor hold never actually fires: the fullest any one crop gets is ~72 MELON while the
+  shed as a whole peaks at 99/100. It looks exactly like a bug worth fixing. It isn't —
+  correcting it to the total is consistently *worse*: `>= CAP-5` scored $50,526/$50,407 over
+  two n=15 batches and `>= CAP-1` scored $50,047, against a ~$51,481 baseline. The mechanism
+  is clear once measured: making the valve work forces selling into crashed prices, which
+  costs more than the overflow it guards against — and that overflow never materialises
+  anyway, since the shed tops out at 99/100 without ever discarding. Left as-is deliberately.
+- **SELL_THROTTLE, re-swept under the current 4-crop config** (was last tuned at v5, when
+  production was a third of today's and there was only one crop) — 3 looked like a win on a
+  single n=10 pass ($52,063) and averaged $50,749 over two n=15 batches, below the ~$51,481
+  baseline; 2 scored $50,442 and 5 scored $50,779. 1 stays. Another clean catch by the
+  two-batch rule.
 - **Animal ranching (SHEEP)** — traced the CARE-bonus mechanic precisely and confirmed a real
   steady-state 3x production multiplier with full daily care. Built a dedicated rancher
   worker end-to-end (pasture, animal, daily feed/care, harvest/sell) — confirmed working,
