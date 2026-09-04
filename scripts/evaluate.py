@@ -11,6 +11,7 @@ from kaggle_environments import make
 
 from policy.heuristic import agent
 from scripts.melon_maxxer_ref import melon_maxxer
+from scripts.melon_maxxer_plus_ref import melon_maxxer_plus
 
 # pass/random/starter are all market-inert against every crop we grow --
 # starter's only production is a single CARROT tile (9 units sold across a
@@ -18,9 +19,18 @@ from scripts.melon_maxxer_ref import melon_maxxer
 # MELON/TOMATO/WHEAT/STRAWBERRY. melon_maxxer (the competition's own
 # tutorial reference agent, kept verbatim in melon_maxxer_ref.py) is weak
 # but genuinely produces and sells MELON into the SAME shared market["inventory"]
-# counter we sell into -- the one opponent here that stress-tests real
-# price competition rather than solo economics.
-BASELINES = ["pass", "random", "starter", melon_maxxer]
+# counter we sell into -- a real, if mild, price-competition stress test.
+# melon_maxxer_plus (5 hired hands, sells threshold removed) is a real
+# stress test rather than a mild one: measured a genuine ~10% mean-money
+# hit (~$51.5k solo -> ~$46.3k) from real shared-MELON-market pressure,
+# confirmed via realized price (avg $209.3 solo -> $199.4 here, min
+# crashing to $37 vs $111 solo) -- a vulnerability weak opponents can't
+# surface at all. Tried a more-diversified CROP_MIX (3:2:2) specifically
+# against it hoping less MELON exposure would help; it didn't ($45.6k,
+# worse) -- the current 4:1:2 mix is the more robust choice even under
+# real competition, not just against weak ones, so this stays as a
+# permanent check that any future crop-mix change should also clear.
+BASELINES = ["pass", "random", "starter", melon_maxxer, melon_maxxer_plus]
 EPISODES_PER_SIDE = 5
 EPISODE_STEPS = 720
 
