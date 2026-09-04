@@ -191,13 +191,36 @@ was close) before being kept.
 
 ### Dropped or rejected (kept so they aren't re-litigated without new evidence)
 
-- **Fertilizer, twice** — re-derived the yield math per crop instead of trusting a generic
-  rejection: MELON and TOMATO already hit their yield cap via plain watering alone, but
-  WHEAT's window is short enough (3 days) that it doesn't (`1+3*1=4` vs a cap of 6) — a
-  genuine +50%/cycle opportunity. Built it properly for WHEAT (fixed two more real bugs:
-  `PICKUP` only recognized one of four valid shed tiles, and hands don't exist in the
-  observation until hour 1). Confirmed working end-to-end, still net-negative — the daily
-  pickup trip costs more than the yield gain even where the math favors it.
+- **Fertilizer, three times now** — attempt 1-2 (WHEAT, pre-land-expansion): re-derived the
+  yield math per crop instead of trusting a generic rejection — MELON and TOMATO already hit
+  their yield cap via plain watering alone, but WHEAT's window is short enough (3 days) that
+  it doesn't (`1+3*1=4` vs a cap of 6), a genuine +50%/cycle opportunity. Built it properly
+  (fixed two more real bugs along the way: `PICKUP` only recognized one of four valid shed
+  tiles, and hands don't exist in the observation until hour 1). Confirmed working
+  end-to-end, still net-negative — the daily pickup trip costs more than the yield gain even
+  where the math favors it. Attempt 3 (STRAWBERRY, this session): re-checked the direct
+  dollar math with STRAWBERRY in the mix — WHEAT's own economics don't survive even before
+  counting a trip (fertilizer costs ~$100 base; +1 WHEAT unit at ~$25-31 nets ~$60-90,
+  already underwater), but STRAWBERRY looked different on paper: ongoing, harvested the
+  moment `yield_units>0`, so the fertilizer's +2-vs-+1 per tick is one extra unit at
+  STRAWBERRY's confirmed-never-crashing ~$235-285, comfortably clearing the ~$100 cost, and
+  every worker already spawns at a shed tile on their first turn of the day so PICKUP looked
+  nearly free. Built it (`BUY_PRODUCT`/`PICKUP`/`FERTILIZE`, gated to piggyback on movement
+  the worker was already doing) — first version displaced due waterings and caused real
+  STRAWBERRY tiles to weed-convert (`consecutive_unwatered` hitting 2, 18 tiles destroyed in
+  one game); fixed by only ever substituting FERTILIZE in when the current tile specifically
+  didn't need water that visit. That fixed the destruction but exposed the actual reason this
+  doesn't work: the fertilizer bonus only applies on a day the tile is *also* watered
+  (`fertilized = was_watered and fertilized_until_day >= current_day` in the env source), but
+  production only ticks on specific scheduled days (`days_since_first % interval == 0`) —
+  getting the bonus requires fertilizing 1-2 days *before* a scheduled tick, not just
+  whenever it's safe to. Confirmed empirically: STRAWBERRY revenue was flat-to-worse with
+  fertilizer active (71 units/$21,203 vs baseline 78/$21,965) despite `FERTILIZE` firing 55
+  times in one game — the applications just weren't landing on tick days. Properly exploiting
+  it would need real interval-aware scheduling, not opportunistic timing; reverted rather
+  than build that without a clearer sense it would pay off enough to justify the added
+  complexity, given even the STRAWBERRY-specific dollar math is a smaller margin (~$150/
+  application, before the trip and now also before this timing problem) than it first looked.
 - **Animal ranching (SHEEP)** — traced the CARE-bonus mechanic precisely and confirmed a real
   steady-state 3x production multiplier with full daily care. Built a dedicated rancher
   worker end-to-end (pasture, animal, daily feed/care, harvest/sell) — confirmed working,
