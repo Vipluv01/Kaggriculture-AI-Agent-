@@ -381,5 +381,17 @@ no timing benefit). Both closed with real numbers, not just reasoning. Every str
 flagged as "worth trying with real logic changes" earlier this session has now actually been
 tried.
 
+**Where the remaining episode-to-episode variance (~$2,500-2,800 stdev, n=15-20) actually
+comes from, traced directly**: compared action counts across a batch's worst and best
+episodes and found them essentially identical (HARVEST=334, PLANT=144, same every time) --
+this agent's own production is fully deterministic against these opponents. MELON's realized
+average sell price was *exactly* 209.3 in three separate episodes (its own volume is large
+enough to fully determine its own price path), but WHEAT and STRAWBERRY's realized prices
+swung meaningfully episode to episode (STRAWBERRY: 240.6 to 303.1) despite identical
+production counts. So the variance is real but external: path-dependent price realization on
+the smaller-volume crops, not a fixable gap in this agent's decisions -- there's no
+production or timing slack left to reclaim locally; what's left is noise in the shared
+market's exact event ordering.
+
 Otherwise: the recorded-episode datasets on Kaggle/HF, for imitation learning as a possible
 next direction beyond the rule-based approach.
