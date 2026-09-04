@@ -262,10 +262,12 @@ point — see lever 4's aside — and it's a reasonable bet some fraction of ~70
 started from something similar). Pulled that exact reference agent from the tutorial notebook
 verbatim into `scripts/melon_maxxer_ref.py` and added it as a fourth `evaluate.py` opponent —
 weak (one farmer, no hands or land, dumps its whole shed at once) but genuinely selling MELON
-into the same shared market we do. Result: our mean money against it ($49,691) lands in the
-same range as against the other three baselines, i.e. its real, if modest, MELON-market
-pressure doesn't measurably hurt us. Kept as a permanent addition to the test suite, not just
-a one-off check, since any future crop-mix change should be validated against it too.
+into the same shared market we do. Result: our mean money against it lands in the same range
+as against the other three baselines — $49,691 on the standard 10-episode `evaluate.py` pass,
+confirmed with a 15-episode robustness check (mean $50,749, stdev $2,471, indistinguishable
+from the other baselines' variance) — i.e. its real, if modest, MELON-market pressure doesn't
+measurably hurt us. Kept as a permanent addition to the test suite, not just a one-off check,
+since any future crop-mix change should be validated against it too.
 
 Current results (`scripts/evaluate.py`, 10 episodes each, alternating sides), full 720-turn season:
 
