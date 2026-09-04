@@ -57,7 +57,7 @@ v17 heuristic (`policy/heuristic.py`) — current best, submitted. Progression:
 | v14 | stop buying land nobody can staff: only NE, not all 3 extra quadrants | ~47.0k |
 | v15 | **drop NE's WHEAT diversifier**: not needed at NE's small (~3-worker) scale | ~51.3k |
 | v16 | nearest-actionable-tile targeting instead of fixed snake-order traversal | ~51.5k |
-| v17 | sell faster during a real price surge (SELL_SURGE_FRAC/THROTTLE) | **~51.6k, lower variance** |
+| v17 | sell faster during a real price surge (SELL_SURGE_FRAC/THROTTLE) | ~51.6k, lower variance — **ladder 600.0** |
 
 Real ladder scores (all `COMPLETE`; scores are a live skill rating against a growing ~7000-team
 opponent pool, not raw dollars, and drift over time for everyone as that pool strengthens —
@@ -66,7 +66,7 @@ v3=201.2, v4 climbed 372.7→441.4→439.7→426.6 across re-submits while it wa
 v5=361.6, v6=445.9, v7=398.9, v8=426.6, v9=440.2, v10=473.1, v11=406.7, v12=416.5, v13=489.2,
 v14=466.8, v15=499.4 (later re-checks of the same submission ranged 452.3-509.5, a useful
 reminder the number moves with the live pool even for unchanged code), v16=460.8,
-**v17=pending submission**.
+**v17=600.0 — first submission clear of 500, and a large jump over v16's 460.8**.
 
 ### Levers found
 
