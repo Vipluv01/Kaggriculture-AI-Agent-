@@ -73,7 +73,15 @@ isn't pool-wide drift, it's noise in how early/how-few evaluation games a fresh 
 number is based on before it settles. Treat a submission's score as unreliable until it's
 been re-checked at least once; 486.6 (still above v16's 460.8) is the number to trust here,
 not the initial 600.0. (Later re-check: 495.1, drifting with the pool as documented above.)
-**v18=pending submission.**
+**v18: first read 600.0 again, settled to 450.5.** The exact repeat of 600.0 on a fresh
+submission's first read (identical to v17's) is suspicious enough to treat as a placeholder
+Kaggle shows before real evaluation completes, not a genuine measurement — ignore any
+submission's first 600.0 entirely rather than reading it as a promising signal. 450.5 is
+below both v17 (~485-495) and v16 (460.8), which doesn't match the clean local validation
+(real gains against both weak opponents and `melon_maxxer_plus`, see lever 13) — but one
+post-settle reading isn't proof either way given the pool's own documented drift (v15's
+unchanged submission ranged 452-509 over time). Not reverting on this alone; flagged
+honestly rather than only reporting the local wins.
 
 ### Levers found
 
@@ -239,6 +247,21 @@ was close) before being kept.
     ~$51,481-51,550 baseline) — and with *lower* variance than 0.4 in both scenarios (~$2,061
     weak vs baseline's ~$2,600-2,765; ~$2,679 competitive vs baseline's ~$2,775). A genuinely
     better setting on every axis measured, not a bet on one kind of opponent over another.
+
+    *Follow-up: re-checked whether other selling-related parameters have the same
+    weak-opponent/real-competition gap the floor did — most don't.* `SELL_SURGE_FRAC`/
+    `THROTTLE` (1.2/2.0 and 3/5 vs the shipped 1.5/3), `CROP_MIX` (5:1:1, more MELON, on the
+    theory that 3:2:2's failure meant "less MELON is bad" so "more" might be "more good" —
+    it wasn't, worse either direction), and `SELL_THROTTLE` (2, 3) were all tested directly
+    against `melon_maxxer_plus` and came back flat or worse — the shipped settings are
+    already robust to competition on those axes, not just weak-opponent-optimal by luck.
+    `LIQUIDATION_DAYS=5` looked like a genuine small win under competition (combined n=30:
+    $48,678 vs $48,057, tight batch agreement, lower variance) but cost real money AND added
+    substantial variance against weak opponents (combined n=30: $50,353 vs the
+    ~$51,481-51,591 baseline, stdev ~$4,116 vs the usual ~$2,000-2,765) — a real trade-off,
+    unlike the floor retune, and not worth taking. `SELL_PRICE_FLOOR_FRAC` remains the one
+    parameter so far where weak-opponent tuning and real-competition tuning genuinely
+    diverged.
 
 ### Dropped or rejected (kept so they aren't re-litigated without new evidence)
 
