@@ -257,6 +257,19 @@ was close) before being kept.
   across these three (51.3k/52.5k/51.0k) was wide enough that a third batch was worth running
   — a useful data point on when two batches alone aren't enough. 0.2/0.3/0.5 all scored
   lower on the initial n=10 pass and weren't pursued further. 0.4 stays.
+- **Staggering MELON's initial planting to smooth the harvest lump.** Measured the shed's
+  MELON count by day and found it genuinely is a shock, not a gradual buildup: 0 -> 49 -> 26
+  -> 3 -> 0 around day 11-13 (all 4 MELON workers plant day 0 and mature together on the
+  fixed max_yield_day=12 cycle), repeating every ~10 days. Hypothesis: delaying each MELON
+  worker's *first* planting by `local_idx * MELON_STAGGER_DAYS` would turn that into a
+  rolling harvest, spreading sales out and avoiding whatever price impact the concentrated
+  dump causes. Implemented it (a `plant_delay` that only gates the empty-tile branch, falls
+  through to plain PASS rather than the WHEAT fallback so it doesn't just plant something
+  else during the wait) and swept 1/2/3/4 days: monotonically worse as delay grows (1:
+  $51,222, 2: $50,339, 3: $48,745, 4: $47,779, n=10 each), and 1 day confirmed flat at n=15
+  ($51,389 vs ~$51,481 baseline). The delayed labor's own opportunity cost outweighs whatever
+  smoothing benefit exists — apparently larger than expected, since even a 1-day stagger (a
+  tiny nudge) bought nothing. Reverted.
 - **Animal ranching (SHEEP)** — traced the CARE-bonus mechanic precisely and confirmed a real
   steady-state 3x production multiplier with full daily care. Built a dedicated rancher
   worker end-to-end (pasture, animal, daily feed/care, harvest/sell) — confirmed working,
