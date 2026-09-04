@@ -377,14 +377,32 @@ from the other baselines' variance) — i.e. its real, if modest, MELON-market p
 measurably hurt us. Kept as a permanent addition to the test suite, not just a one-off check,
 since any future crop-mix change should be validated against it too.
 
+**A fifth opponent, because the fourth one turned out too weak to prove anything.**
+`melon_maxxer` never actually sells: confirmed directly that our own selling alone keeps
+MELON's price below its $200 threshold, so it just sits on unsold inventory the whole game.
+Built `melon_maxxer_plus_ref.py` — the same naive strategy with 5 hired hands and the sell
+threshold removed, so it genuinely competes for the shared market instead of being priced
+out of it by design. (Caught a real bug building it: the multi-worker version dropped the
+`age >= MELON_MAX_YIELD_DAY` maturity gate the original farmer logic had, so HARVEST was a
+silent env no-op the whole game — 1031 HARVEST actions, 0 units ever reached the shed, until
+fixed.) With a genuine competitor in place, the result is different from `melon_maxxer`'s:
+a real ~10% mean-money hit (~$51.5k solo → ~$46.3k), confirmed via realized price (avg
+$209.3 solo → $199.4, minimum crashing to $37 vs $111 solo) — the first local evidence of a
+real vulnerability weak opponents can't surface at all. Tested whether a more-diversified
+`CROP_MIX` (3:2:2, less MELON exposure) would help specifically against this pressure; it
+didn't ($45.6k, worse) — the current 4:1:2 mix holds up as the more robust choice even under
+genuine competition, not just an artifact of testing against weak ones. Kept permanently for
+the same reason as `melon_maxxer`.
+
 Current results (`scripts/evaluate.py`, 10 episodes each, alternating sides), full 720-turn season:
 
 | opponent | our mean $ | their mean $ | win rate |
 |---|---|---|---|
-| pass         | 51118 | 3000 | 10/10 |
-| random       | 50900 |   96 | 10/10 |
-| starter      | 51382 | 3543 | 10/10 |
-| melon_maxxer | 49691 | 4100 | 10/10 |
+| pass              | 51118 | 3000 | 10/10 |
+| random            | 50900 |   96 | 10/10 |
+| starter           | 51382 | 3543 | 10/10 |
+| melon_maxxer      | 49691 | 4100 | 10/10 |
+| melon_maxxer_plus | 46261 | 6597 | 10/10 |
 
 v15 was confirmed with a 15-episode robustness check: mean $51,348, stdev $1,945 (~3.8%) —
 nowhere near enough variance to explain the v14→v15 +9.2% jump by chance (t≈6.8). v16's
