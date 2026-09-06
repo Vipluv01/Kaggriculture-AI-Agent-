@@ -263,6 +263,15 @@ was close) before being kept.
     parameter so far where weak-opponent tuning and real-competition tuning genuinely
     diverged.
 
+    *Further follow-up, same session*: `NW_WORKERS=6` (shifting a worker from NW/MELON
+    toward NE/STRAWBERRY, reducing MELON exposure directly rather than via the crop ratio)
+    was clearly worse against the competitor too ($40,700, n=15) — confirms NW=7 is optimal
+    under competition as well as against weak opponents, not just coincidentally tuned for
+    one. `HANDS_CAP` (5, 7) and `CASH_RESERVE` (400, 800) were also checked directly against
+    `melon_maxxer_plus` and came back flat-to-worse in every case (n=10 quick passes, none
+    close enough to the baseline to justify a full multi-batch validation) — both remain at
+    their already-established values (6 and 200) under competition too.
+
 ### Dropped or rejected (kept so they aren't re-litigated without new evidence)
 
 - **Fertilizer, three times now** — attempt 1-2 (WHEAT, pre-land-expansion): re-derived the
